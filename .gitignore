@@ -1,0 +1,71 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# uv
+.uv-cache/
+
+# Testing & coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.cover
+.hypothesis/
+
+# Type checking
+.mypy_cache/
+.ruff_cache/
+.dmypy.json
+dmypy.json
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# OS
+nul
+
+# Runtime SQLite (document number counter, audit, etc.)
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# Real customer data files (never committed)
+# Sample data lives in tests/fixtures/ and is intentionally tracked.
+data/
+uploads/
+
+# Generated documents (invoices, packing lists, etc.)
+output/
+generated/
+*.pdf
+
+# Local config overrides (if introduced later)
+.env
+.env.local
+config.local.*
+
+# Backup conventions (matches template repo pattern)
+*.pre-*.bak
