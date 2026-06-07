@@ -22,6 +22,7 @@ Document number template syntax per CONTRACT_v1.md §10:
 
 from __future__ import annotations
 
+import os
 import sqlite3
 from dataclasses import dataclass
 from datetime import date
@@ -173,11 +174,29 @@ DEFAULT_COUNTER_SCOPE: str = "per_seller_annual"
 def _resolve_counter_db_path() -> Path:
     """Locate the SQLite counter store.
 
-    Default path: ``./var/counters.db`` relative to the python-erp repo
-    root. Callers may override via ``ERP_ENGINE_COUNTER_DB`` env var when
-    we wire that in v1.1.
+    Resolution order (first match wins):
+        1. ``ERP_ENGINE_COUNTER_DB`` env var — explicit absolute path.
+           Wired in Packet 3 (2026-06-07) so the prod container can point
+           the counter at a named-volume-backed path
+           (``/var/erp-engine/counters.db``) and survive image rebuilds.
+        2. Default: ``<python-erp repo root>/var/counters.db`` — used by
+           local dev (Windows: ``C:\\xampp\\htdocs\\python-erp\\var\\counters.db``).
+
+    The directory is created if missing; the file itself is created on
+    first connect by sqlite3.
     """
-    # Repo root is two parents above this file (src/erp_engine/modules/proforma).
+    env_override = os.environ.get("ERP_ENGINE_COUNTER_DB", "").strip()
+    if env_override:
+        path = Path(env_override)
+        # Create the parent dir if it doesn't already exist. Inside the
+        # prod container this is /var/erp-engine — pre-created by the
+        # Dockerfile + mounted as a named volume — so this is a no-op
+        # there. The mkdir is a courtesy for misconfigured environments.
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return path
+
+    # Repo root is four parents above this file
+    # (src/erp_engine/modules/proforma/rules.py → python-erp/).
     repo_root = Path(__file__).resolve().parents[4]
     var_dir = repo_root / "var"
     var_dir.mkdir(parents=True, exist_ok=True)

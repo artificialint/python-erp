@@ -288,3 +288,42 @@ def test_counter_db_atomic_increment_smoke(isolated_counter_db: Path) -> None:
     )
     assert first == "PRF-IST-2026-00001"
     assert second == "PRF-IST-2026-00002"
+
+
+def test_counter_db_path_honors_env_override(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ERP_ENGINE_COUNTER_DB env var redirects the counter store.
+
+    Wired in Packet 3 (2026-06-07) so the prod container can put the
+    counter SQLite file on a named-volume-backed path that survives
+    image rebuilds. The default path stays repo-relative; only the env
+    override changes the location.
+    """
+    from erp_engine.modules.proforma.rules import _resolve_counter_db_path
+
+    # Default behaviour — no env var set: falls back to repo-root/var.
+    monkeypatch.delenv("ERP_ENGINE_COUNTER_DB", raising=False)
+    default_path = _resolve_counter_db_path()
+    assert default_path.name == "counters.db"
+    assert default_path.parent.name == "var"
+
+    # With env var set — the override path is returned and its parent
+    # directory is created on the fly. We point at a nested path inside
+    # tmp_path that does not yet exist so we exercise the mkdir branch.
+    override = tmp_path / "container" / "erp-engine" / "counters.db"
+    assert not override.parent.exists()
+    monkeypatch.setenv("ERP_ENGINE_COUNTER_DB", str(override))
+
+    resolved = _resolve_counter_db_path()
+    assert resolved == override
+    assert override.parent.is_dir(), "parent dir should be created"
+
+    # Empty / whitespace env value must fall back to the default path
+    # (defensive — protects against a misconfigured .env with a blank
+    # value like `ERP_ENGINE_COUNTER_DB=`).
+    monkeypatch.setenv("ERP_ENGINE_COUNTER_DB", "   ")
+    blank_resolved = _resolve_counter_db_path()
+    assert blank_resolved.name == "counters.db"
+    assert blank_resolved.parent.name == "var"
