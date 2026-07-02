@@ -327,3 +327,54 @@ def test_counter_db_path_honors_env_override(
     blank_resolved = _resolve_counter_db_path()
     assert blank_resolved.name == "counters.db"
     assert blank_resolved.parent.name == "var"
+
+
+# ─────────────────────────────────────────────────────────────────────
+# A1 amendment — document_type variants (quotation / proforma / commercial)
+# Contract change: CONTRACT_v1 §7.2/§11.2 + PROFORMA_v1 §5.1.
+# module Literal, calculation logic, and numbering are unchanged by A1.
+# ─────────────────────────────────────────────────────────────────────
+
+
+def test_default_document_type_is_proforma_invoice(isolated_counter_db: Path) -> None:
+    """The default document_type stays proforma_invoice and is echoed to the result."""
+    payload = _minimal_valid_payload()
+
+    response = create_proforma(payload)
+
+    assert response["status"] == "ok"
+    assert response["result"]["document"]["document_type"] == "proforma_invoice"
+
+
+def test_quotation_document_type_accepted(isolated_counter_db: Path) -> None:
+    """document_type='quotation' is accepted and propagated into the result."""
+    payload = _minimal_valid_payload()
+    payload["payload"]["header"]["document_type"] = "quotation"
+
+    response = create_proforma(payload)
+
+    assert response["status"] == "ok"
+    assert response["result"]["document"]["document_type"] == "quotation"
+
+
+def test_commercial_invoice_document_type_accepted(isolated_counter_db: Path) -> None:
+    """document_type='commercial_invoice' is accepted and propagated into the result."""
+    payload = _minimal_valid_payload()
+    payload["payload"]["header"]["document_type"] = "commercial_invoice"
+
+    response = create_proforma(payload)
+
+    assert response["status"] == "ok"
+    assert response["result"]["document"]["document_type"] == "commercial_invoice"
+
+
+def test_invalid_document_type_rejected(isolated_counter_db: Path) -> None:
+    """An unknown document_type fails the Literal and yields a validation_error."""
+    payload = _minimal_valid_payload()
+    payload["payload"]["header"]["document_type"] = "bogus_type"
+
+    response = create_proforma(payload)
+
+    assert response["status"] == "validation_error"
+    assert response["result"] is None
+    assert response["errors"], "expected a validation error for an unknown document_type"

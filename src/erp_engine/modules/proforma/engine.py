@@ -206,6 +206,7 @@ def create_proforma(payload: dict) -> dict:
     result = ProformaResult(
         document=ResultDocument(
             document_no=document_no,
+            document_type=proforma.header.document_type,
             issue_date=proforma.header.issue_date,
             valid_until=valid_until,
             currency=proforma.header.currency,

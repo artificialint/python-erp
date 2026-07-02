@@ -115,7 +115,9 @@ class Header(BaseModel):
     Contract reference: CONTRACT_v1.md §7.2.
     """
 
-    document_type: Literal["proforma_invoice"] = "proforma_invoice"
+    document_type: Literal["quotation", "proforma_invoice", "commercial_invoice"] = (
+        "proforma_invoice"
+    )
     issue_date: str  # ISO date YYYY-MM-DD
     document_no: Optional[str] = None  # engine generates if absent
     currency: str  # ISO 4217; v1 must match seller default
@@ -269,7 +271,9 @@ class ResultDocument(BaseModel):
     Contract reference: CONTRACT_v1.md §11.2.
     """
 
-    document_type: Literal["proforma_invoice"] = "proforma_invoice"
+    document_type: Literal["quotation", "proforma_invoice", "commercial_invoice"] = (
+        "proforma_invoice"
+    )
     document_no: str
     issue_date: str
     valid_until: str
