@@ -1,0 +1,7 @@
+{
+  "code": "invoice",
+  "name": "Invoice",
+  "version": "0.1.0",
+  "engine_module": "proforma_invoice",
+  "permissions": ["invoice.admin", "invoice.user"]
+}
