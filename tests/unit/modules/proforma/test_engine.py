@@ -15,6 +15,7 @@ These tests exercise the request → engine → response contract end to end.
 from __future__ import annotations
 
 import sqlite3
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -23,6 +24,7 @@ from erp_engine.modules.proforma import create_proforma
 from erp_engine.modules.proforma.rules import (
     _build_scope_key,
     _ensure_counter_schema,
+    CustomerNoRequiredError,
     generate_document_number,
 )
 
@@ -378,3 +380,168 @@ def test_invalid_document_type_rejected(isolated_counter_db: Path) -> None:
     assert response["status"] == "validation_error"
     assert response["result"] is None
     assert response["errors"], "expected a validation error for an unknown document_type"
+
+
+# ─────────────────────────────────────────────────────────────────────
+# A4 amendment — customer-anchored document numbering (2026-07-05)
+# Principle: customer_no = human-readable LABEL; SEQ = seller-scoped legal
+# ledger sequence (gapless, never per-buyer). Contract change:
+# CONTRACT_v1 §10 (tokens {CUSTOMER_NO}/{YY}/{MM}, scope
+# per_seller_doctype_monthly, tenant-prefixed keys) + §7.4 buyer.customer_no.
+# ─────────────────────────────────────────────────────────────────────
+
+A4_TEMPLATE = "{CUSTOMER_NO}{YY}{MM}{SEQ:3}"
+A4_SCOPE = "per_seller_doctype_monthly"
+
+
+def test_a4_legacy_prf_unchanged(isolated_counter_db: Path) -> None:
+    """Legacy PRF template + per_seller_annual renders byte-identical (no new
+    params passed) and the legacy scope key stays un-prefixed."""
+    n1 = generate_document_number(
+        seller_code="IST", issue_date=date(2026, 6, 7), db_path=isolated_counter_db
+    )
+    n2 = generate_document_number(
+        seller_code="IST", issue_date=date(2026, 6, 7), db_path=isolated_counter_db
+    )
+    assert n1 == "PRF-IST-2026-00001"
+    assert n2 == "PRF-IST-2026-00002"
+    assert _build_scope_key("per_seller_annual", "IST", date(2026, 6, 7)) == "IST|2026"
+
+
+def test_a4_customer_no_yy_mm_render(isolated_counter_db: Path) -> None:
+    """{CUSTOMER_NO}/{YY}/{MM} render; default format → 1042607001."""
+    num = generate_document_number(
+        seller_code="IST",
+        issue_date=date(2026, 7, 3),
+        template=A4_TEMPLATE,
+        counter_scope=A4_SCOPE,
+        customer_no=104,
+        document_type="invoice",
+        tenant_key="18",
+        db_path=isolated_counter_db,
+    )
+    assert num == "1042607001"  # 104 + YY 26 + MM 07 + SEQ 001
+
+
+def test_a4_two_buyers_same_seller_month_share_sequence(
+    isolated_counter_db: Path,
+) -> None:
+    """Q1 legal guarantee: SEQ is seller-scoped — two different buyers in the
+    same seller/doctype/month continue the SAME ledger sequence (001, 002),
+    never reset per buyer."""
+    first = generate_document_number(
+        seller_code="IST", issue_date=date(2026, 7, 3), template=A4_TEMPLATE,
+        counter_scope=A4_SCOPE, customer_no=104, document_type="invoice",
+        tenant_key="18", db_path=isolated_counter_db,
+    )
+    second = generate_document_number(
+        seller_code="IST", issue_date=date(2026, 7, 20), template=A4_TEMPLATE,
+        counter_scope=A4_SCOPE, customer_no=250, document_type="invoice",
+        tenant_key="18", db_path=isolated_counter_db,
+    )
+    assert first == "1042607001"
+    assert second == "2502607002"  # different buyer, SEQ continues in seller ledger
+
+
+def test_a4_two_tenants_same_seller_isolated(isolated_counter_db: Path) -> None:
+    """Q4 fix: tenant_key isolates counters even with an identical seller_code."""
+    a = generate_document_number(
+        seller_code="IST", issue_date=date(2026, 7, 3), template=A4_TEMPLATE,
+        counter_scope=A4_SCOPE, customer_no=104, document_type="invoice",
+        tenant_key="18", db_path=isolated_counter_db,
+    )
+    b = generate_document_number(
+        seller_code="IST", issue_date=date(2026, 7, 3), template=A4_TEMPLATE,
+        counter_scope=A4_SCOPE, customer_no=104, document_type="invoice",
+        tenant_key="19", db_path=isolated_counter_db,
+    )
+    assert a == "1042607001"
+    assert b == "1042607001"  # tenant 19 starts its own sequence (no collision)
+
+
+def test_a4_month_rollover_resets_sequence(isolated_counter_db: Path) -> None:
+    """Month is in the scope key → SEQ resets when the month rolls over."""
+    jul = generate_document_number(
+        seller_code="IST", issue_date=date(2026, 7, 31), template=A4_TEMPLATE,
+        counter_scope=A4_SCOPE, customer_no=104, document_type="invoice",
+        tenant_key="18", db_path=isolated_counter_db,
+    )
+    aug = generate_document_number(
+        seller_code="IST", issue_date=date(2026, 8, 1), template=A4_TEMPLATE,
+        counter_scope=A4_SCOPE, customer_no=104, document_type="invoice",
+        tenant_key="18", db_path=isolated_counter_db,
+    )
+    assert jul == "1042607001"
+    assert aug == "1042608001"  # SEQ resets in the new month
+
+
+def test_a4_document_type_separates_counters(isolated_counter_db: Path) -> None:
+    """Different document_type → independent counters within the same month."""
+    inv = generate_document_number(
+        seller_code="IST", issue_date=date(2026, 7, 3), template=A4_TEMPLATE,
+        counter_scope=A4_SCOPE, customer_no=104, document_type="invoice",
+        tenant_key="18", db_path=isolated_counter_db,
+    )
+    pro = generate_document_number(
+        seller_code="IST", issue_date=date(2026, 7, 3), template=A4_TEMPLATE,
+        counter_scope=A4_SCOPE, customer_no=104, document_type="proforma",
+        tenant_key="18", db_path=isolated_counter_db,
+    )
+    assert inv.endswith("001")
+    assert pro.endswith("001")  # separate document_type → separate ledger
+
+
+def test_a4_missing_customer_no_raises_without_burning_sequence(
+    isolated_counter_db: Path,
+) -> None:
+    """{CUSTOMER_NO} in template + no customer_no → CustomerNoRequiredError,
+    and the counter is NOT consumed (the next valid call is still 001)."""
+    with pytest.raises(CustomerNoRequiredError):
+        generate_document_number(
+            seller_code="IST", issue_date=date(2026, 7, 3), template=A4_TEMPLATE,
+            counter_scope=A4_SCOPE, customer_no=None, document_type="invoice",
+            tenant_key="18", db_path=isolated_counter_db,
+        )
+    ok = generate_document_number(
+        seller_code="IST", issue_date=date(2026, 7, 3), template=A4_TEMPLATE,
+        counter_scope=A4_SCOPE, customer_no=104, document_type="invoice",
+        tenant_key="18", db_path=isolated_counter_db,
+    )
+    assert ok == "1042607001"  # sequence not burned by the failed attempt
+
+
+def test_a4_envelope_missing_customer_no_validation_error(
+    isolated_counter_db: Path,
+) -> None:
+    """Full envelope: A4 numbering config but no buyer.customer_no →
+    status validation_error with code customer_no_required."""
+    payload = _minimal_valid_payload()
+    payload["payload"]["numbering"] = {"template": A4_TEMPLATE, "counter_scope": A4_SCOPE}
+    response = create_proforma(payload)
+    assert response["status"] == "validation_error"
+    codes = [e["code"] for e in response["errors"]]
+    assert "customer_no_required" in codes, response["errors"]
+
+
+def test_a4_envelope_full_flow(isolated_counter_db: Path) -> None:
+    """Full envelope: A4 numbering config + buyer.customer_no + tenant → the
+    engine renders the customer-anchored number and echoes the scope."""
+    payload = _minimal_valid_payload()  # issue_date 2026-06-07 → YY 26, MM 06
+    payload["payload"]["numbering"] = {"template": A4_TEMPLATE, "counter_scope": A4_SCOPE}
+    payload["payload"]["buyer"]["customer_no"] = 104
+    payload["context"]["customer_id"] = 18
+    response = create_proforma(payload)
+    assert response["status"] == "ok", response.get("errors")
+    assert response["result"]["document"]["document_no"] == "1042606001"
+    assert response["result"]["calculation_trace"]["counter_scope"] == A4_SCOPE
+    assert response["result"]["calculation_trace"]["document_number_template"] == A4_TEMPLATE
+
+
+def test_a4_default_engine_numbering_still_prf(isolated_counter_db: Path) -> None:
+    """Back-compat: a payload with no numbering block uses the engine default
+    (PRF) — the product default lives caller-side, not in the engine."""
+    payload = _minimal_valid_payload()
+    response = create_proforma(payload)
+    assert response["status"] == "ok"
+    assert response["result"]["document"]["document_no"].startswith("PRF-IST-2026-")
+    assert response["result"]["calculation_trace"]["counter_scope"] == "per_seller_annual"

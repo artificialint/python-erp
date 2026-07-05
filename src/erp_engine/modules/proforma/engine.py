@@ -20,6 +20,7 @@ from pydantic import ValidationError as PydanticValidationError
 from .rules import (
     DEFAULT_COUNTER_SCOPE,
     DEFAULT_DOC_NUMBER_TEMPLATE,
+    CustomerNoRequiredError,
     MissingTaxRuleError,
     generate_document_number,
     resolve_tax,
@@ -90,16 +91,38 @@ def create_proforma(payload: dict) -> dict:
         issue_date + timedelta(days=30)
     ).isoformat()
 
-    # ── 4. Document number ──────────────────────────────────────────
+    # ── 4. Document number (A4: customer-anchored, tenant-isolated) ──
+    # Numbering config is caller-supplied (tenant settings_json.numbering);
+    # absent → engine defaults (legacy PRF / per_seller_annual). tenant_key
+    # namespaces the counter per tenant and is sourced from the existing
+    # context.customer_id — absent → legacy un-prefixed key (back-compat).
+    number_template = proforma.numbering.template or DEFAULT_DOC_NUMBER_TEMPLATE
+    counter_scope = proforma.numbering.counter_scope or DEFAULT_COUNTER_SCOPE
+    tenant_key = (
+        str(envelope.context.customer_id)
+        if envelope.context.customer_id is not None
+        else None
+    )
     if proforma.header.document_no:
         document_no = proforma.header.document_no
     else:
-        document_no = generate_document_number(
-            seller_code=proforma.seller.company_code,
-            issue_date=issue_date,
-            template=DEFAULT_DOC_NUMBER_TEMPLATE,
-            counter_scope=DEFAULT_COUNTER_SCOPE,
-        )
+        try:
+            document_no = generate_document_number(
+                seller_code=proforma.seller.company_code,
+                issue_date=issue_date,
+                template=number_template,
+                counter_scope=counter_scope,
+                customer_no=proforma.buyer.customer_no,
+                document_type=proforma.header.document_type,
+                tenant_key=tenant_key,
+            )
+        except CustomerNoRequiredError as exc:
+            return _single_validation_error_response(
+                envelope.request_id,
+                code="customer_no_required",
+                field="buyer.customer_no",
+                message=str(exc),
+            ).model_dump()
 
     # ── 5. Ship-to resolution ───────────────────────────────────────
     ship_to_resolved = _resolve_ship_to(proforma)
@@ -221,8 +244,8 @@ def create_proforma(payload: dict) -> dict:
         calculation_trace=CalculationTrace(
             tax_precedence_applied=precedence_sources,
             tax_reason_summary=tax_reasons,
-            document_number_template=DEFAULT_DOC_NUMBER_TEMPLATE,
-            counter_scope=DEFAULT_COUNTER_SCOPE,
+            document_number_template=number_template,
+            counter_scope=counter_scope,
         ),
     )
 

@@ -154,6 +154,7 @@ class Buyer(BaseModel):
     phone: Optional[str] = None
     email: Optional[str] = None
     tax_no: Optional[str] = None
+    customer_no: Optional[int] = None  # A4 — buyer master number; label for {CUSTOMER_NO}
     source: Literal["db_lookup", "manual_entry"] = "manual_entry"
 
 
@@ -237,6 +238,21 @@ class Notes(BaseModel):
     internal_notes: Optional[str] = None
 
 
+class Numbering(BaseModel):
+    """Document-numbering config (A4, 2026-07-05).
+
+    Caller-supplied numbering rule (from the tenant's
+    ``customer_module_settings.settings_json.numbering``). Absent / None
+    fields fall back to the engine defaults (legacy PRF template +
+    ``per_seller_annual``), preserving backward compatibility.
+
+    Contract reference: CONTRACT_v1.md §10.
+    """
+
+    template: Optional[str] = None
+    counter_scope: Optional[str] = None
+
+
 class ProformaPayload(BaseModel):
     """Top-level proforma payload.
 
@@ -251,6 +267,7 @@ class ProformaPayload(BaseModel):
     terms: Terms = Field(default_factory=Terms)
     banking: Banking = Field(default_factory=Banking)
     notes: Notes = Field(default_factory=Notes)
+    numbering: Numbering = Field(default_factory=Numbering)  # A4
 
     @field_validator("line_items")
     @classmethod

@@ -170,6 +170,21 @@ def resolve_tax(
 DEFAULT_DOC_NUMBER_TEMPLATE: str = "PRF-{SELLER_CODE}-{YEAR}-{SEQ:5}"
 DEFAULT_COUNTER_SCOPE: str = "per_seller_annual"
 
+# A4 amendment (2026-07-05) — customer-anchored numbering.
+# The buyer's customer_no is a human-readable LABEL; the legal SEQ stays
+# seller-scoped and gapless. This scope adds document_type + month; every
+# scope is tenant-prefixed for multi-tenant isolation (missing tenant_key
+# → legacy un-prefixed key). See docs/CONTRACT_A4_CUSTOMER_NUMBERING.md.
+SCOPE_PER_SELLER_DOCTYPE_MONTHLY: str = "per_seller_doctype_monthly"
+
+
+class CustomerNoRequiredError(Exception):
+    """A numbering template references ``{CUSTOMER_NO}`` but the payload
+    carries no ``buyer.customer_no``. The engine surfaces this as a
+    field-targeted ``customer_no_required`` validation error (A4). Raised
+    BEFORE the counter is touched, so a missing label never burns a
+    sequence number."""
+
 
 def _resolve_counter_db_path() -> Path:
     """Locate the SQLite counter store.
@@ -248,17 +263,33 @@ def _build_scope_key(
     counter_scope: str,
     seller_code: str,
     issue_date: date,
+    *,
+    document_type: Optional[str] = None,
+    tenant_key: Optional[str] = None,
 ) -> str:
-    """Return the SQLite key used to namespace the counter."""
+    """Return the SQLite key used to namespace the counter.
+
+    A4 (2026-07-05): every scope is tenant-prefixed for multi-tenant
+    isolation — two tenants that reuse the same ``seller_code`` keep
+    independent sequences. A missing ``tenant_key`` falls back to the
+    legacy un-prefixed key so existing single-tenant counters are
+    undisturbed (backward compatibility). ``document_type`` participates
+    only in ``per_seller_doctype_monthly``.
+    """
     scope = counter_scope.strip().lower()
+    prefix = f"{tenant_key}|" if tenant_key not in (None, "") else ""
+    year = issue_date.year
+    month = f"{issue_date.month:02d}"
     if scope == "per_seller_annual":
-        return f"{seller_code}|{issue_date.year}"
+        return f"{prefix}{seller_code}|{year}"
     if scope == "per_seller_monthly":
-        return f"{seller_code}|{issue_date.year}-{issue_date.month:02d}"
+        return f"{prefix}{seller_code}|{year}-{month}"
+    if scope == SCOPE_PER_SELLER_DOCTYPE_MONTHLY:
+        return f"{prefix}{seller_code}|{document_type or ''}|{year}-{month}"
     if scope == "global_annual":
-        return f"GLOBAL|{issue_date.year}"
+        return f"{prefix}GLOBAL|{year}"
     # Conservative default: per_seller_annual semantics.
-    return f"{seller_code}|{issue_date.year}"
+    return f"{prefix}{seller_code}|{year}"
 
 
 def generate_document_number(
@@ -267,23 +298,51 @@ def generate_document_number(
     issue_date: date,
     template: str = DEFAULT_DOC_NUMBER_TEMPLATE,
     counter_scope: str = DEFAULT_COUNTER_SCOPE,
+    customer_no: Optional[object] = None,
+    document_type: Optional[str] = None,
+    tenant_key: Optional[str] = None,
     db_path: Optional[Path] = None,
 ) -> str:
     """Render the document number template against the current counter state.
 
-    Supported tokens per CONTRACT_v1.md §10:
+    Supported tokens per CONTRACT_v1.md §10 (A4 adds the first three):
+        ``{CUSTOMER_NO}``, ``{YY}``, ``{MM}``,
         ``{SELLER_CODE}``, ``{YEAR}``, ``{MONTH}``, ``{SEQ:N}``
 
     ``{RANDOM:N}`` is intentionally not implemented yet — the contract
     lists it as "if later enabled".
+
+    A4 (2026-07-05): ``customer_no`` is a human-readable LABEL rendered
+    into ``{CUSTOMER_NO}``; the legal ``{SEQ}`` stays seller-scoped and
+    gapless (never per-buyer). ``document_type`` + ``tenant_key`` feed the
+    counter scope key. If the template uses ``{CUSTOMER_NO}`` but no
+    ``customer_no`` is supplied, ``CustomerNoRequiredError`` is raised
+    BEFORE the counter is touched (no sequence is burned).
     """
-    scope_key = _build_scope_key(counter_scope, seller_code, issue_date)
+    # A4 guard — refuse to render a blank customer label. Runs before the
+    # counter is incremented so a missing label never consumes a sequence.
+    if "{CUSTOMER_NO}" in template and customer_no in (None, ""):
+        raise CustomerNoRequiredError(
+            "template references {CUSTOMER_NO} but buyer.customer_no is missing"
+        )
+
+    scope_key = _build_scope_key(
+        counter_scope,
+        seller_code,
+        issue_date,
+        document_type=document_type,
+        tenant_key=tenant_key,
+    )
     seq = _next_seq(scope_key, db_path=db_path)
 
     rendered = template
     rendered = rendered.replace("{SELLER_CODE}", seller_code)
+    if customer_no not in (None, ""):
+        rendered = rendered.replace("{CUSTOMER_NO}", str(customer_no))
     rendered = rendered.replace("{YEAR}", str(issue_date.year))
+    rendered = rendered.replace("{YY}", f"{issue_date.year % 100:02d}")
     rendered = rendered.replace("{MONTH}", f"{issue_date.month:02d}")
+    rendered = rendered.replace("{MM}", f"{issue_date.month:02d}")
 
     # {SEQ:N} — N-wide zero-padded sequence
     if "{SEQ:" in rendered:
