@@ -251,6 +251,7 @@ class Numbering(BaseModel):
 
     template: Optional[str] = None
     counter_scope: Optional[str] = None
+    seq: Optional[int] = None  # A5 — caller-supplied sequence → render-only (no counter)
 
 
 class ProformaPayload(BaseModel):

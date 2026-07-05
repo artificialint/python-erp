@@ -26,6 +26,7 @@ from erp_engine.modules.proforma.rules import (
     _ensure_counter_schema,
     CustomerNoRequiredError,
     generate_document_number,
+    render_document_number,
 )
 
 
@@ -545,3 +546,97 @@ def test_a4_default_engine_numbering_still_prf(isolated_counter_db: Path) -> Non
     assert response["status"] == "ok"
     assert response["result"]["document"]["document_no"].startswith("PRF-IST-2026-")
     assert response["result"]["calculation_trace"]["counter_scope"] == "per_seller_annual"
+
+
+# ─────────────────────────────────────────────────────────────────────
+# A5 amendment — render-only numbering (2026-07-05)
+# The online issue path (INV-4) allocates the legal seq in MySQL and passes it
+# via payload.numbering.seq; the engine renders WITHOUT touching its counter.
+# Standalone/desktop keeps generate_document_number (SQLite counter).
+# ─────────────────────────────────────────────────────────────────────
+
+
+def _counter_row_count(db_path: Path) -> int:
+    if not db_path.exists():
+        return 0
+    with sqlite3.connect(db_path) as conn:
+        _ensure_counter_schema(conn)
+        return conn.execute("SELECT COUNT(*) FROM doc_counter").fetchone()[0]
+
+
+def test_a5_render_basic() -> None:
+    """render_document_number formats a caller-supplied seq (no DB needed)."""
+    out = render_document_number(
+        "PRF-{SELLER_CODE}-{YEAR}-{SEQ:5}", seq=7, seller_code="IST", issue_date=date(2026, 1, 1)
+    )
+    assert out == "PRF-IST-2026-00007"
+
+
+def test_a5_render_customer_anchored_seq1() -> None:
+    out = render_document_number(
+        A4_TEMPLATE, seq=1, customer_no=104, issue_date=date(2026, 7, 3)
+    )
+    assert out == "1042607001"  # 104 + YY26 + MM07 + SEQ001
+
+
+def test_a5_render_seq_padding() -> None:
+    assert render_document_number("{SEQ:5}", seq=42, issue_date=date(2026, 7, 3)) == "00042"
+    assert render_document_number("{SEQ}", seq=42, issue_date=date(2026, 7, 3)) == "42"
+
+
+def test_a5_render_missing_customer_no_raises() -> None:
+    with pytest.raises(CustomerNoRequiredError):
+        render_document_number(A4_TEMPLATE, seq=1, customer_no=None, issue_date=date(2026, 7, 3))
+
+
+def test_a5_render_touches_no_counter(isolated_counter_db: Path) -> None:
+    """The render-only path never writes to doc_counter."""
+    for _ in range(3):
+        render_document_number(A4_TEMPLATE, seq=5, customer_no=104, issue_date=date(2026, 7, 3))
+    assert _counter_row_count(isolated_counter_db) == 0
+
+
+def test_a5_render_parity_with_generate(isolated_counter_db: Path) -> None:
+    """render_document_number(seq=S) == generate_document_number when it
+    allocates that same S — proving one shared render implementation."""
+    allocated = generate_document_number(
+        seller_code="IST", issue_date=date(2026, 7, 3), template=A4_TEMPLATE,
+        counter_scope=A4_SCOPE, customer_no=104, document_type="invoice",
+        tenant_key="18", db_path=isolated_counter_db,
+    )  # first alloc → seq 1
+    rendered = render_document_number(
+        A4_TEMPLATE, seq=1, customer_no=104, issue_date=date(2026, 7, 3)
+    )
+    assert allocated == rendered == "1042607001"
+
+
+def test_a5_envelope_seq_renders_and_no_counter(isolated_counter_db: Path) -> None:
+    """create_proforma with numbering.seq → renders that seq, counter untouched."""
+    payload = _minimal_valid_payload()  # issue_date 2026-06-07 → YY26 MM06
+    payload["payload"]["numbering"] = {"template": A4_TEMPLATE, "counter_scope": A4_SCOPE, "seq": 42}
+    payload["payload"]["buyer"]["customer_no"] = 104
+    response = create_proforma(payload)
+    assert response["status"] == "ok", response.get("errors")
+    assert response["result"]["document"]["document_no"] == "1042606042"
+    assert _counter_row_count(isolated_counter_db) == 0  # render-only, no allocation
+
+
+def test_a5_draft_still_bypasses_numbering(isolated_counter_db: Path) -> None:
+    """The DRAFT brake still wins over numbering.seq — no number, no counter."""
+    payload = _minimal_valid_payload()
+    payload["payload"]["header"]["document_no"] = "DRAFT"
+    payload["payload"]["numbering"] = {"template": A4_TEMPLATE, "seq": 9}
+    payload["payload"]["buyer"]["customer_no"] = 104
+    response = create_proforma(payload)
+    assert response["status"] == "ok"
+    assert response["result"]["document"]["document_no"] == "DRAFT"
+    assert _counter_row_count(isolated_counter_db) == 0
+
+
+def test_a5_legacy_generate_unchanged(isolated_counter_db: Path) -> None:
+    """No seq → allocate path unchanged (A4/legacy behavior)."""
+    n1 = generate_document_number(
+        seller_code="IST", issue_date=date(2026, 6, 7), db_path=isolated_counter_db
+    )
+    assert n1 == "PRF-IST-2026-00001"
+    assert _counter_row_count(isolated_counter_db) == 1  # allocation DID write

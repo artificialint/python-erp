@@ -23,6 +23,7 @@ from .rules import (
     CustomerNoRequiredError,
     MissingTaxRuleError,
     generate_document_number,
+    render_document_number,
     resolve_tax,
 )
 from .schema import (
@@ -103,19 +104,32 @@ def create_proforma(payload: dict) -> dict:
         if envelope.context.customer_id is not None
         else None
     )
+    # Resolution order: explicit document_no (e.g. DRAFT brake) > A5 render-only
+    # (caller supplied numbering.seq — online issue, MySQL-allocated, NO engine
+    # counter) > allocate via the SQLite counter (standalone/desktop).
     if proforma.header.document_no:
         document_no = proforma.header.document_no
     else:
         try:
-            document_no = generate_document_number(
-                seller_code=proforma.seller.company_code,
-                issue_date=issue_date,
-                template=number_template,
-                counter_scope=counter_scope,
-                customer_no=proforma.buyer.customer_no,
-                document_type=proforma.header.document_type,
-                tenant_key=tenant_key,
-            )
+            if proforma.numbering.seq is not None:
+                document_no = render_document_number(
+                    number_template,
+                    seq=proforma.numbering.seq,
+                    seller_code=proforma.seller.company_code,
+                    customer_no=proforma.buyer.customer_no,
+                    issue_date=issue_date,
+                    document_type=proforma.header.document_type,
+                )
+            else:
+                document_no = generate_document_number(
+                    seller_code=proforma.seller.company_code,
+                    issue_date=issue_date,
+                    template=number_template,
+                    counter_scope=counter_scope,
+                    customer_no=proforma.buyer.customer_no,
+                    document_type=proforma.header.document_type,
+                    tenant_key=tenant_key,
+                )
         except CustomerNoRequiredError as exc:
             return _single_validation_error_response(
                 envelope.request_id,

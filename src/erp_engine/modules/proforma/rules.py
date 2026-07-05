@@ -335,6 +335,37 @@ def generate_document_number(
     )
     seq = _next_seq(scope_key, db_path=db_path)
 
+    # Token render is shared with render_document_number (A5) — one source.
+    return _render_number_tokens(
+        template,
+        seq,
+        seller_code=seller_code,
+        customer_no=customer_no,
+        issue_date=issue_date,
+    )
+
+
+def _render_number_tokens(
+    template: str,
+    seq: int,
+    *,
+    seller_code: str = "",
+    customer_no: Optional[object] = None,
+    issue_date: date,
+) -> str:
+    """Render document-number tokens from a given ``seq``. Pure formatting —
+    NO counter, NO DB. Single source of truth for both the allocate path
+    (``generate_document_number``) and the render-only path
+    (``render_document_number``, A5).
+
+    Supported tokens: ``{SELLER_CODE} {CUSTOMER_NO} {YEAR} {YY} {MONTH} {MM}
+    {SEQ:N}``. If the template references ``{CUSTOMER_NO}`` but none is
+    supplied → ``CustomerNoRequiredError`` (no silent blank).
+    """
+    if "{CUSTOMER_NO}" in template and customer_no in (None, ""):
+        raise CustomerNoRequiredError(
+            "template references {CUSTOMER_NO} but buyer.customer_no is missing"
+        )
     rendered = template
     rendered = rendered.replace("{SELLER_CODE}", seller_code)
     if customer_no not in (None, ""):
@@ -358,3 +389,34 @@ def generate_document_number(
         rendered = rendered.replace("{SEQ}", str(seq))
 
     return rendered
+
+
+def render_document_number(
+    template: str,
+    *,
+    seq: int,
+    seller_code: str = "",
+    customer_no: Optional[object] = None,
+    issue_date: date,
+    document_type: Optional[str] = None,
+) -> str:
+    """A5 amendment (2026-07-05) — render a document number from a
+    CALLER-SUPPLIED sequence, with NO counter side effect.
+
+    The online issue path (INV-4) allocates the legal sequence in the MySQL
+    ledger transaction and passes it here purely for formatting, so numbering
+    and document persistence stay atomic (the engine's SQLite counter is not
+    used online). Standalone/desktop keeps ``generate_document_number`` (which
+    owns the SQLite counter). Token logic is shared via
+    ``_render_number_tokens`` — one render implementation, two entry points.
+
+    ``document_type`` is accepted for call-site symmetry (it is a counter-scope
+    dimension, not a render token) and is intentionally unused here.
+    """
+    return _render_number_tokens(
+        template,
+        seq,
+        seller_code=seller_code,
+        customer_no=customer_no,
+        issue_date=issue_date,
+    )
