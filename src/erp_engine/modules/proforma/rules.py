@@ -177,6 +177,22 @@ DEFAULT_COUNTER_SCOPE: str = "per_seller_annual"
 # → legacy un-prefixed key). See docs/CONTRACT_A4_CUSTOMER_NUMBERING.md.
 SCOPE_PER_SELLER_DOCTYPE_MONTHLY: str = "per_seller_doctype_monthly"
 
+# A6 amendment (2026-07-10) — canonical lifecycle numbering.
+# One shared ledger per (tenant | seller | customer | month): the base
+# sequence is born when the first Quotation is created and INHERITED by the
+# Proforma/Commercial derived from it — document_type is deliberately NOT part
+# of this scope key (Q/P/C collapse onto one base; only the rendered leading
+# {DOCUMENT_TYPE_CODE} digit differs). Additive: the A4 scopes above keep
+# working unchanged. See docs/CONTRACT_A6_LIFECYCLE_NUMBERING.md.
+SCOPE_PER_SELLER_CUSTOMER_MONTHLY: str = "per_seller_customer_monthly"
+
+# A6 — the canonical document-family digit rendered by {DOCUMENT_TYPE_CODE}.
+DOCUMENT_TYPE_CODES: dict = {
+    "quotation": "1",
+    "proforma_invoice": "2",
+    "commercial_invoice": "3",
+}
+
 
 class CustomerNoRequiredError(Exception):
     """A numbering template references ``{CUSTOMER_NO}`` but the payload
@@ -184,6 +200,14 @@ class CustomerNoRequiredError(Exception):
     field-targeted ``customer_no_required`` validation error (A4). Raised
     BEFORE the counter is touched, so a missing label never burns a
     sequence number."""
+
+
+class DocumentTypeCodeRequiredError(Exception):
+    """A numbering template references ``{DOCUMENT_TYPE_CODE}`` but no
+    (known) ``document_type`` was supplied (A6). Unreachable from the engine
+    envelope path — ``header.document_type`` is a schema Literal with a
+    default — so this guards direct library callers only. Raised BEFORE the
+    counter is touched."""
 
 
 def _resolve_counter_db_path() -> Path:
@@ -265,6 +289,7 @@ def _build_scope_key(
     issue_date: date,
     *,
     document_type: Optional[str] = None,
+    customer_no: Optional[object] = None,
     tenant_key: Optional[str] = None,
 ) -> str:
     """Return the SQLite key used to namespace the counter.
@@ -275,6 +300,11 @@ def _build_scope_key(
     legacy un-prefixed key so existing single-tenant counters are
     undisturbed (backward compatibility). ``document_type`` participates
     only in ``per_seller_doctype_monthly``.
+
+    A6 (2026-07-10): ``per_seller_customer_monthly`` keys on the CUSTOMER
+    instead of the document type — Q/P/C share one ledger (the lifecycle
+    base). ``customer_no`` is required for that scope (raises
+    ``CustomerNoRequiredError`` before any counter is touched).
     """
     scope = counter_scope.strip().lower()
     prefix = f"{tenant_key}|" if tenant_key not in (None, "") else ""
@@ -286,6 +316,13 @@ def _build_scope_key(
         return f"{prefix}{seller_code}|{year}-{month}"
     if scope == SCOPE_PER_SELLER_DOCTYPE_MONTHLY:
         return f"{prefix}{seller_code}|{document_type or ''}|{year}-{month}"
+    if scope == SCOPE_PER_SELLER_CUSTOMER_MONTHLY:
+        # A6: document_type deliberately NOT in the key — Q/P/C share the base.
+        if customer_no in (None, ""):
+            raise CustomerNoRequiredError(
+                "counter_scope per_seller_customer_monthly requires buyer.customer_no"
+            )
+        return f"{prefix}{seller_code}|{customer_no}|{year}-{month}"
     if scope == "global_annual":
         return f"{prefix}GLOBAL|{year}"
     # Conservative default: per_seller_annual semantics.
@@ -305,8 +342,9 @@ def generate_document_number(
 ) -> str:
     """Render the document number template against the current counter state.
 
-    Supported tokens per CONTRACT_v1.md §10 (A4 adds the first three):
-        ``{CUSTOMER_NO}``, ``{YY}``, ``{MM}``,
+    Supported tokens per CONTRACT_v1.md §10 (A4 adds the first three,
+    A6 adds ``{DOCUMENT_TYPE_CODE}``):
+        ``{DOCUMENT_TYPE_CODE}``, ``{CUSTOMER_NO}``, ``{YY}``, ``{MM}``,
         ``{SELLER_CODE}``, ``{YEAR}``, ``{MONTH}``, ``{SEQ:N}``
 
     ``{RANDOM:N}`` is intentionally not implemented yet — the contract
@@ -325,12 +363,22 @@ def generate_document_number(
         raise CustomerNoRequiredError(
             "template references {CUSTOMER_NO} but buyer.customer_no is missing"
         )
+    # A6 guard — same principle: an unrenderable {DOCUMENT_TYPE_CODE} must be
+    # rejected BEFORE the counter increments (no sequence is ever burned).
+    if "{DOCUMENT_TYPE_CODE}" in template and not DOCUMENT_TYPE_CODES.get(
+        (document_type or "").strip().lower()
+    ):
+        raise DocumentTypeCodeRequiredError(
+            "template references {DOCUMENT_TYPE_CODE} but document_type is "
+            f"missing or unknown: {document_type!r}"
+        )
 
     scope_key = _build_scope_key(
         counter_scope,
         seller_code,
         issue_date,
         document_type=document_type,
+        customer_no=customer_no,
         tenant_key=tenant_key,
     )
     seq = _next_seq(scope_key, db_path=db_path)
@@ -342,6 +390,7 @@ def generate_document_number(
         seller_code=seller_code,
         customer_no=customer_no,
         issue_date=issue_date,
+        document_type=document_type,
     )
 
 
@@ -352,21 +401,33 @@ def _render_number_tokens(
     seller_code: str = "",
     customer_no: Optional[object] = None,
     issue_date: date,
+    document_type: Optional[str] = None,
 ) -> str:
     """Render document-number tokens from a given ``seq``. Pure formatting —
     NO counter, NO DB. Single source of truth for both the allocate path
     (``generate_document_number``) and the render-only path
     (``render_document_number``, A5).
 
-    Supported tokens: ``{SELLER_CODE} {CUSTOMER_NO} {YEAR} {YY} {MONTH} {MM}
-    {SEQ:N}``. If the template references ``{CUSTOMER_NO}`` but none is
-    supplied → ``CustomerNoRequiredError`` (no silent blank).
+    Supported tokens: ``{DOCUMENT_TYPE_CODE} {SELLER_CODE} {CUSTOMER_NO}
+    {YEAR} {YY} {MONTH} {MM} {SEQ:N}``. If the template references
+    ``{CUSTOMER_NO}`` but none is supplied → ``CustomerNoRequiredError``;
+    ``{DOCUMENT_TYPE_CODE}`` with a missing/unknown ``document_type`` →
+    ``DocumentTypeCodeRequiredError`` (A6; no silent blank either way).
     """
     if "{CUSTOMER_NO}" in template and customer_no in (None, ""):
         raise CustomerNoRequiredError(
             "template references {CUSTOMER_NO} but buyer.customer_no is missing"
         )
     rendered = template
+    # A6 — canonical document-family digit (1=quotation, 2=proforma, 3=commercial).
+    if "{DOCUMENT_TYPE_CODE}" in rendered:
+        type_code = DOCUMENT_TYPE_CODES.get((document_type or "").strip().lower())
+        if not type_code:
+            raise DocumentTypeCodeRequiredError(
+                "template references {DOCUMENT_TYPE_CODE} but document_type is "
+                f"missing or unknown: {document_type!r}"
+            )
+        rendered = rendered.replace("{DOCUMENT_TYPE_CODE}", type_code)
     rendered = rendered.replace("{SELLER_CODE}", seller_code)
     if customer_no not in (None, ""):
         rendered = rendered.replace("{CUSTOMER_NO}", str(customer_no))
@@ -410,8 +471,10 @@ def render_document_number(
     owns the SQLite counter). Token logic is shared via
     ``_render_number_tokens`` — one render implementation, two entry points.
 
-    ``document_type`` is accepted for call-site symmetry (it is a counter-scope
-    dimension, not a render token) and is intentionally unused here.
+    A6 (2026-07-10): ``document_type`` is now ALSO a render input — it feeds
+    the ``{DOCUMENT_TYPE_CODE}`` leading digit (1=quotation, 2=proforma_invoice,
+    3=commercial_invoice). For templates without that token it remains inert
+    (pre-A6 behavior unchanged).
     """
     return _render_number_tokens(
         template,
@@ -419,4 +482,5 @@ def render_document_number(
         seller_code=seller_code,
         customer_no=customer_no,
         issue_date=issue_date,
+        document_type=document_type,
     )

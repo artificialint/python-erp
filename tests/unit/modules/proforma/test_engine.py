@@ -25,6 +25,7 @@ from erp_engine.modules.proforma.rules import (
     _build_scope_key,
     _ensure_counter_schema,
     CustomerNoRequiredError,
+    DocumentTypeCodeRequiredError,
     generate_document_number,
     render_document_number,
 )
@@ -640,3 +641,128 @@ def test_a5_legacy_generate_unchanged(isolated_counter_db: Path) -> None:
     )
     assert n1 == "PRF-IST-2026-00001"
     assert _counter_row_count(isolated_counter_db) == 1  # allocation DID write
+
+
+# ─────────────────────────────────────────────────────────────────────
+# A6 amendment — canonical lifecycle numbering (2026-07-10)
+# {DOCUMENT_TYPE_CODE}{SELLER_CODE}{CUSTOMER_NO}{YY}{MM}{SEQ:3} — the base
+# sequence is born at the first Quotation (scope per_seller_customer_monthly:
+# doctype NOT in the key) and inherited by Proforma/Commercial via the A5
+# render-only path; only the leading type digit differs. Additive: all A4/A5
+# scopes and tests above stay valid. Contract: CONTRACT_v1 §10 (A6).
+# ─────────────────────────────────────────────────────────────────────
+
+A6_TEMPLATE = "{DOCUMENT_TYPE_CODE}{SELLER_CODE}{CUSTOMER_NO}{YY}{MM}{SEQ:3}"
+A6_SCOPE = "per_seller_customer_monthly"
+
+
+def test_a6_document_type_code_renders(isolated_counter_db: Path) -> None:
+    """Codex's canonical example: seller 02, customer 104, 2026-07, seq 001
+    → quotation 1021042607001."""
+    num = generate_document_number(
+        seller_code="02", issue_date=date(2026, 7, 3), template=A6_TEMPLATE,
+        counter_scope=A6_SCOPE, customer_no=104, document_type="quotation",
+        tenant_key="19", db_path=isolated_counter_db,
+    )
+    assert num == "1021042607001"
+
+
+def test_a6_shared_base_across_lifecycle(isolated_counter_db: Path) -> None:
+    """The base born at the Quotation is inherited by Proforma/Commercial via
+    the render-only path: same seq, only the leading digit changes."""
+    quotation = generate_document_number(
+        seller_code="02", issue_date=date(2026, 7, 3), template=A6_TEMPLATE,
+        counter_scope=A6_SCOPE, customer_no=104, document_type="quotation",
+        tenant_key="19", db_path=isolated_counter_db,
+    )
+    proforma = render_document_number(
+        A6_TEMPLATE, seq=1, seller_code="02", customer_no=104,
+        issue_date=date(2026, 7, 3), document_type="proforma_invoice",
+    )
+    commercial = render_document_number(
+        A6_TEMPLATE, seq=1, seller_code="02", customer_no=104,
+        issue_date=date(2026, 7, 3), document_type="commercial_invoice",
+    )
+    assert quotation == "1021042607001"
+    assert proforma == "2021042607001"
+    assert commercial == "3021042607001"
+    assert quotation[1:] == proforma[1:] == commercial[1:]  # shared base
+
+
+def test_a6_scope_key_ignores_doctype_and_keys_on_customer() -> None:
+    """per_seller_customer_monthly: doctype NOT in the key (Q/P/C share one
+    ledger); customer IS in the key (each buyer gets its own ledger)."""
+    q = _build_scope_key(A6_SCOPE, "02", date(2026, 7, 3),
+                         document_type="quotation", customer_no=104, tenant_key="19")
+    p = _build_scope_key(A6_SCOPE, "02", date(2026, 7, 3),
+                         document_type="proforma_invoice", customer_no=104, tenant_key="19")
+    other = _build_scope_key(A6_SCOPE, "02", date(2026, 7, 3),
+                             document_type="quotation", customer_no=250, tenant_key="19")
+    assert q == p == "19|02|104|2026-07"
+    assert other == "19|02|250|2026-07"  # different buyer → different ledger
+
+
+def test_a6_per_customer_ledgers_and_month_reset(isolated_counter_db: Path) -> None:
+    """Inverse of the A4 seller-ledger: under A6 each buyer starts its own
+    sequence, and the month rolls the sequence over."""
+    a = generate_document_number(
+        seller_code="02", issue_date=date(2026, 7, 3), template=A6_TEMPLATE,
+        counter_scope=A6_SCOPE, customer_no=104, document_type="quotation",
+        tenant_key="19", db_path=isolated_counter_db,
+    )
+    b = generate_document_number(
+        seller_code="02", issue_date=date(2026, 7, 5), template=A6_TEMPLATE,
+        counter_scope=A6_SCOPE, customer_no=250, document_type="quotation",
+        tenant_key="19", db_path=isolated_counter_db,
+    )
+    c = generate_document_number(
+        seller_code="02", issue_date=date(2026, 8, 1), template=A6_TEMPLATE,
+        counter_scope=A6_SCOPE, customer_no=104, document_type="quotation",
+        tenant_key="19", db_path=isolated_counter_db,
+    )
+    assert a == "1021042607001"
+    assert b == "1022502607001"  # buyer 250 starts its own ledger at 001
+    assert c == "1021042608001"  # new month → seq resets
+
+
+def test_a6_scope_requires_customer_no(isolated_counter_db: Path) -> None:
+    """New scope with no customer_no → CustomerNoRequiredError BEFORE the
+    counter is touched (template without {CUSTOMER_NO} still guards)."""
+    with pytest.raises(CustomerNoRequiredError):
+        generate_document_number(
+            seller_code="02", issue_date=date(2026, 7, 3),
+            template="{DOCUMENT_TYPE_CODE}{SELLER_CODE}{YY}{MM}{SEQ:3}",
+            counter_scope=A6_SCOPE, customer_no=None, document_type="quotation",
+            tenant_key="19", db_path=isolated_counter_db,
+        )
+    assert _counter_row_count(isolated_counter_db) == 0  # nothing burned
+
+
+def test_a6_unknown_doctype_raises_without_burning_sequence(
+    isolated_counter_db: Path,
+) -> None:
+    """{DOCUMENT_TYPE_CODE} + unknown/missing document_type →
+    DocumentTypeCodeRequiredError, counter untouched."""
+    with pytest.raises(DocumentTypeCodeRequiredError):
+        generate_document_number(
+            seller_code="02", issue_date=date(2026, 7, 3), template=A6_TEMPLATE,
+            counter_scope=A6_SCOPE, customer_no=104, document_type="invoice",
+            tenant_key="19", db_path=isolated_counter_db,
+        )
+    assert _counter_row_count(isolated_counter_db) == 0
+
+
+def test_a6_envelope_render_only_with_type_digit(isolated_counter_db: Path) -> None:
+    """Full envelope path (A5 render-only) with the A6 template: the engine
+    renders the caller-supplied seq with the doctype digit, no counter."""
+    payload = _minimal_valid_payload()  # issue_date 2026-06-07 → YY26 MM06
+    payload["payload"]["seller"]["company_code"] = "02"
+    payload["payload"]["header"]["document_type"] = "proforma_invoice"
+    payload["payload"]["numbering"] = {
+        "template": A6_TEMPLATE, "counter_scope": A6_SCOPE, "seq": 42,
+    }
+    payload["payload"]["buyer"]["customer_no"] = 104
+    response = create_proforma(payload)
+    assert response["status"] == "ok", response.get("errors")
+    assert response["result"]["document"]["document_no"] == "2021042606042"
+    assert _counter_row_count(isolated_counter_db) == 0
