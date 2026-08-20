@@ -18,6 +18,7 @@ from datetime import date, datetime, timedelta, timezone
 from pydantic import ValidationError as PydanticValidationError
 
 from .rules import (
+    CounterStoreError,
     DEFAULT_COUNTER_SCOPE,
     DEFAULT_DOC_NUMBER_TEMPLATE,
     CustomerNoRequiredError,
@@ -137,21 +138,20 @@ def create_proforma(payload: dict) -> dict:
                 field="buyer.customer_no",
                 message=str(exc),
             ).model_dump()
-        except Exception as exc:  # noqa: BLE001 — see the note below
-            # QA PE2: the number-allocation path touches a counter store, and only
-            # CustomerNoRequiredError was caught. A locked, missing or read-only store
-            # therefore escaped as a raw sqlite3.OperationalError straight through the
-            # contract boundary — the caller expects a response envelope and got a
-            # stack trace. Infrastructure failure is an execution_error, and it is
-            # distinct from a validation_error: the request was fine, we could not
-            # serve it.
+        except CounterStoreError as exc:
+            # QA PE2 (revised after A's review): the number-allocation path touches a
+            # counter store, and only CustomerNoRequiredError was caught, so a locked,
+            # missing or read-only store escaped as a raw sqlite3.OperationalError
+            # straight through the contract boundary. Infrastructure failure is an
+            # execution_error — the request was fine, we could not serve it.
             #
-            # Caught broadly ON PURPOSE. The obvious version is `except sqlite3.Error`,
-            # but importing sqlite3 here would deepen the very impurity that H1/PE1
-            # reports — the engine must not know what the counter store is made of. A
-            # broad catch scoped to this one call keeps the engine storage-agnostic,
-            # and it stays correct if the store later becomes MySQL, as MEMORY.md says
-            # the online path already is.
+            # This catch used to be `except Exception`, which would also have reported
+            # a genuine programming bug as an infrastructure failure. It is now a
+            # domain error raised by rules.py, the module that actually owns the
+            # storage. That keeps the engine storage-agnostic — narrowing to
+            # `sqlite3.Error` here would have meant importing sqlite3 into the engine
+            # and deepening the impurity H1/PE1 reports — while letting a real bug
+            # surface as itself.
             return _single_execution_error_response(
                 envelope.request_id,
                 code="counter_store_unavailable",

@@ -254,10 +254,31 @@ def _ensure_counter_schema(conn: sqlite3.Connection) -> None:
     )
 
 
+class CounterStoreError(Exception):
+    """The document-number counter store could not be read or written.
+
+    QA PE2, revised after review. The engine must return a response envelope
+    rather than let a storage exception escape the contract boundary — but the
+    first version caught ``Exception`` in ``engine.py``, which would also report a
+    genuine programming bug (a ``TypeError``, say) as an infrastructure failure.
+
+    Narrowing the engine's catch to ``sqlite3.Error`` was the obvious alternative,
+    and it is worse: it would import ``sqlite3`` into ``engine.py`` and deepen the
+    impurity that QA H1/PE1 reports. So the translation happens HERE instead — in
+    the module that already owns the storage — and the engine catches this domain
+    error. The engine stays storage-agnostic, and a real bug still surfaces as
+    itself. This also survives the counter moving to MySQL, which ``MEMORY.md``
+    says the online path already uses.
+    """
+
+
 def _next_seq(scope_key: str, db_path: Optional[Path] = None) -> int:
     """Atomically increment the counter for the given scope and return it.
 
     The contract calls for atomic increments per CONTRACT_v1.md §10.
+
+    Raises:
+        CounterStoreError: the counter store is unavailable, locked or read-only.
     """
     path = db_path or _resolve_counter_db_path()
     # QA PE4: `with sqlite3.connect(...)` commits or rolls back the transaction — it
@@ -265,28 +286,33 @@ def _next_seq(scope_key: str, db_path: Optional[Path] = None) -> int:
     # on Windows, a file lock) until the garbage collector happened to run. closing()
     # makes the release deterministic; the inner block keeps transaction semantics
     # exactly as they were.
-    with closing(sqlite3.connect(path, isolation_level=None)) as conn:
-        _ensure_counter_schema(conn)
-        # BEGIN IMMEDIATE blocks other writers, providing the atomic step.
-        conn.execute("BEGIN IMMEDIATE")
-        row = conn.execute(
-            "SELECT current_seq FROM doc_counter WHERE scope_key = ?",
-            (scope_key,),
-        ).fetchone()
-        if row is None:
-            new_seq = 1
-            conn.execute(
-                "INSERT INTO doc_counter (scope_key, current_seq) VALUES (?, ?)",
-                (scope_key, new_seq),
-            )
-        else:
-            new_seq = row[0] + 1
-            conn.execute(
-                "UPDATE doc_counter SET current_seq = ? WHERE scope_key = ?",
-                (new_seq, scope_key),
-            )
-        conn.execute("COMMIT")
-        return new_seq
+    try:
+        with closing(sqlite3.connect(path, isolation_level=None)) as conn:
+            _ensure_counter_schema(conn)
+            # BEGIN IMMEDIATE blocks other writers, providing the atomic step.
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT current_seq FROM doc_counter WHERE scope_key = ?",
+                (scope_key,),
+            ).fetchone()
+            if row is None:
+                new_seq = 1
+                conn.execute(
+                    "INSERT INTO doc_counter (scope_key, current_seq) VALUES (?, ?)",
+                    (scope_key, new_seq),
+                )
+            else:
+                new_seq = row[0] + 1
+                conn.execute(
+                    "UPDATE doc_counter SET current_seq = ? WHERE scope_key = ?",
+                    (new_seq, scope_key),
+                )
+            conn.execute("COMMIT")
+            return new_seq
+    except (sqlite3.Error, OSError) as exc:
+        # Storage failure — translate at the layer that owns the storage so the
+        # engine never has to know what the counter is made of (QA PE2).
+        raise CounterStoreError(str(exc)) from exc
 
 
 def _build_scope_key(
