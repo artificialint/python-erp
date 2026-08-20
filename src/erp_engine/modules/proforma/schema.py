@@ -202,6 +202,42 @@ class LineItem(BaseModel):
             raise ValueError("quantity must be > 0")
         return value
 
+    # QA PE3: quantity was the ONLY bounded numeric field, so the money inputs were
+    # accepted at any value and the engine happily produced a wrong-signed or wildly
+    # inflated document with status "ok". Verified before the fix:
+    #     discount 150%   -> grand_total  -600.0   (the seller pays the buyer)
+    #     discount -10%   -> grand_total  1320.0   (a silent surcharge)
+    #     unit_price -100 -> grand_total -1200.0
+    #     tax 9999%       -> grand_total 100990.0
+    # A malformed request must be refused as a validation_error, not turned into a
+    # plausible-looking invoice — the engine is the last place that can still say no.
+
+    @field_validator("unit_price")
+    @classmethod
+    def _unit_price_not_negative(cls, value: float) -> float:
+        if value < 0:
+            raise ValueError("unit_price must be >= 0")
+        return value
+
+    @field_validator("discount_percent")
+    @classmethod
+    def _discount_in_range(cls, value: float) -> float:
+        # 100% is legitimate (a free-of-charge line); beyond it the line total goes
+        # negative, and below zero it is a surcharge wearing a discount's name.
+        if value < 0 or value > 100:
+            raise ValueError("discount_percent must be between 0 and 100")
+        return value
+
+    @field_validator("tax_percent")
+    @classmethod
+    def _tax_in_range(cls, value: Optional[float]) -> Optional[float]:
+        # None is meaningful here — it asks the engine to resolve the rate itself.
+        if value is None:
+            return value
+        if value < 0 or value > 100:
+            raise ValueError("tax_percent must be between 0 and 100")
+        return value
+
 
 class Terms(BaseModel):
     """Commercial terms.

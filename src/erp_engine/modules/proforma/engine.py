@@ -137,6 +137,26 @@ def create_proforma(payload: dict) -> dict:
                 field="buyer.customer_no",
                 message=str(exc),
             ).model_dump()
+        except Exception as exc:  # noqa: BLE001 — see the note below
+            # QA PE2: the number-allocation path touches a counter store, and only
+            # CustomerNoRequiredError was caught. A locked, missing or read-only store
+            # therefore escaped as a raw sqlite3.OperationalError straight through the
+            # contract boundary — the caller expects a response envelope and got a
+            # stack trace. Infrastructure failure is an execution_error, and it is
+            # distinct from a validation_error: the request was fine, we could not
+            # serve it.
+            #
+            # Caught broadly ON PURPOSE. The obvious version is `except sqlite3.Error`,
+            # but importing sqlite3 here would deepen the very impurity that H1/PE1
+            # reports — the engine must not know what the counter store is made of. A
+            # broad catch scoped to this one call keeps the engine storage-agnostic,
+            # and it stays correct if the store later becomes MySQL, as MEMORY.md says
+            # the online path already is.
+            return _single_execution_error_response(
+                envelope.request_id,
+                code="counter_store_unavailable",
+                message=f"document number could not be allocated: {exc}",
+            ).model_dump()
 
     # ── 5. Ship-to resolution ───────────────────────────────────────
     ship_to_resolved = _resolve_ship_to(proforma)
@@ -400,5 +420,23 @@ def _single_validation_error_response(
         request_id=request_id,
         status="validation_error",
         errors=[ValidationError(code=code, field=field, message=message)],
+        meta={"engine_version": ENGINE_VERSION},
+    )
+
+
+def _single_execution_error_response(
+    request_id: str, *, code: str, message: str
+) -> ResponseEnvelope:
+    """QA PE2: an engine-side failure that is NOT the caller's fault.
+
+    Kept separate from the validation helper because the distinction is the whole
+    point: `validation_error` means "fix your request", `execution_error` means
+    "the request was fine, we could not serve it". A caller retries one and not the
+    other.
+    """
+    return ResponseEnvelope(
+        request_id=request_id,
+        status="execution_error",
+        errors=[ExecutionError(code=code, message=message)],
         meta={"engine_version": ENGINE_VERSION},
     )

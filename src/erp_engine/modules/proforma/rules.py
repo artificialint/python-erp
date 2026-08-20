@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -259,7 +260,12 @@ def _next_seq(scope_key: str, db_path: Optional[Path] = None) -> int:
     The contract calls for atomic increments per CONTRACT_v1.md §10.
     """
     path = db_path or _resolve_counter_db_path()
-    with sqlite3.connect(path, isolation_level=None) as conn:
+    # QA PE4: `with sqlite3.connect(...)` commits or rolls back the transaction — it
+    # does NOT close the connection. Every allocation therefore leaked a handle (and,
+    # on Windows, a file lock) until the garbage collector happened to run. closing()
+    # makes the release deterministic; the inner block keeps transaction semantics
+    # exactly as they were.
+    with closing(sqlite3.connect(path, isolation_level=None)) as conn:
         _ensure_counter_schema(conn)
         # BEGIN IMMEDIATE blocks other writers, providing the atomic step.
         conn.execute("BEGIN IMMEDIATE")
