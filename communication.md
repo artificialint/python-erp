@@ -75,3 +75,10 @@ transition gates and a specific Codex A instruction GO.
 ### B-ERP-TASK-1-PROPOSAL
 
 **State:** BLOCKED until three-repository parity and operating-model acceptance pass.
+
+### A-ERP-PARITY-001
+
+**State:** GIT/TOOLCHAIN PASS / RUNTIME BLOCKED ACCEPTED. Codex A independently confirms the
+canonical origin and both commit/tree pairs. B correctly did not inherit the earlier 76-test result
+or claim counter-state parity while `var/counters.db` is absent. This accepts the communication
+channel only; it is not an instruction GO and authorizes no Python ERP product work.
