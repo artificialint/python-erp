@@ -56,7 +56,21 @@ repo, message ID and commit in `agentai-web/repocommunication.md`.
 
 ### B-ERP-PARITY-001
 
-**State:** PENDING - B must independently verify the new local repository and runtime prerequisites.
+**State:** GIT/TOOLCHAIN PASS / RUNTIME BLOCKED — independently measured by Codex B, 2026-08-21.
+
+- canonical origin: `https://github.com/artificialint/python-erp.git`;
+- `main`: `071fe7b1bda69be018a610033182171edce522f8`, tree
+  `d7de83bb5fd8176c4ea64d201bbf90b61d1b21aa`, local/origin `0 0`;
+- `feat/qa-fixes`: `3439c6a6f28172080c8c67eaa97d1f21b6f8f8ad`, tree
+  `ba7fb1f302cb2cde2822671e4f97c23858a46a7c`, local/origin `0 0`;
+- product verification checkout status: empty; no sensitive/runtime path found tracked;
+- Python `3.12.10`, SQLAlchemy `2.0.52`, pytest `9.1.1` present;
+- `var/counters.db`: absent, so preserved counter/runtime parity is not proven;
+- the previously reported 76-test result was not inherited as new evidence in this docs-only check.
+
+No product edit, test-owned DB creation, merge, DB/runtime mutation, production access, deploy,
+migration or architecture change occurred. Product task remains blocked pending the cross-repo
+transition gates and a specific Codex A instruction GO.
 
 ### B-ERP-TASK-1-PROPOSAL
 
