@@ -7,16 +7,26 @@ Source of truth:
 This file is the executable mirror of the contract. If the contract
 changes, this file changes in the same commit. Tests verify the shape.
 
-Monetary amounts use ``float`` in v1 to match the JSON examples in the
-contract. A future revision may switch to ``Decimal`` once the precision
-policy is locked.
+Monetary amounts are declared as ``float`` because the contract's wire
+format is a JSON number and A7 does not change it. The *arithmetic* is
+exact: as of Amendment A7 the engine converts every amount with
+``Decimal(str(value))``, computes in ``Decimal``, and quantizes results to
+two places with ROUND_HALF_UP before emitting them. A two-decimal value
+round-trips through JSON unchanged, so the envelope stays compatible while
+the amounts it carries are exactly representable as printed. See
+``docs/CONTRACT_A7_MONEY_PRECISION.md``.
 """
 
 from __future__ import annotations
 
+import math
 from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+#: Mirrors ``rules.MAX_AMOUNT_MAGNITUDE``. Declared as a float here so the
+#: validators stay free of Decimal, and kept in sync by a test.
+_MAX_INPUT_MAGNITUDE = 1e15
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -195,6 +205,25 @@ class LineItem(BaseModel):
     tax_percent: Optional[float] = None
     line_notes: Optional[str] = ""
 
+    @field_validator("quantity", "unit_price", "discount_percent", "tax_percent")
+    @classmethod
+    def _finite(cls, value: Optional[float]) -> Optional[float]:
+        # A7: every comparison against NaN is False, so `nan` satisfied
+        # `quantity > 0`, `unit_price >= 0` and both percent bounds, then
+        # propagated into the totals as `nan` with status "ok". Infinity did
+        # the same in the other direction. The range checks below are only
+        # meaningful once the value is known to be finite, so this runs first.
+        if value is not None and not math.isfinite(value):
+            raise ValueError("value must be a finite number")
+        # A7 second pass: bounding magnitude here as well, because an amount
+        # large enough to overflow the Decimal context made `quantize` raise
+        # InvalidOperation straight through the contract boundary — a crash
+        # instead of a validation_error. Refusing it as input keeps the engine's
+        # promise that every response is a well-formed envelope.
+        if value is not None and abs(value) > _MAX_INPUT_MAGNITUDE:
+            raise ValueError(f"value magnitude must not exceed {_MAX_INPUT_MAGNITUDE:g}")
+        return value
+
     @field_validator("quantity")
     @classmethod
     def _quantity_positive(cls, value: float) -> float:
@@ -250,6 +279,21 @@ class Terms(BaseModel):
     delivery_location: Optional[str] = None
     delivery_date: Optional[str] = None
     payment_term: Optional[str] = None
+
+    @field_validator("freight_cost")
+    @classmethod
+    def _freight_finite_and_not_negative(cls, value: float) -> float:
+        # A7: freight_cost is money and reaches the totals directly, but it had
+        # no validator at all, so NaN/Infinity and negative freight all passed.
+        if not math.isfinite(value):
+            raise ValueError("freight_cost must be a finite number")
+        if value < 0:
+            raise ValueError("freight_cost must be >= 0")
+        if value > _MAX_INPUT_MAGNITUDE:
+            raise ValueError(
+                f"freight_cost must not exceed {_MAX_INPUT_MAGNITUDE:g}"
+            )
+        return value
 
 
 class Banking(BaseModel):

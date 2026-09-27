@@ -27,8 +27,126 @@ import sqlite3
 from contextlib import closing
 from dataclasses import dataclass
 from datetime import date
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 from typing import Optional
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Money precision (Amendment A7)
+# ─────────────────────────────────────────────────────────────────────
+#
+# Before A7 every monetary value was float arithmetic rounded to 4 places,
+# so a TRY invoice could legitimately return grand_total 117.9882 — a figure
+# no document can print and no snapshot can reconcile against a PDF. A7 makes
+# the engine the single source of the rounding convention. See
+# docs/CONTRACT_A7_MONEY_PRECISION.md for the normative rules.
+#
+# Why Decimal(str(value)) and not Decimal(value): the schema declares the
+# money inputs as float, so Pydantic has already coerced the JSON number by
+# the time the engine sees it. Decimal(1.005) is 1.00499999999999989341858963...
+# and rounds DOWN under HALF_UP; Decimal(str(1.005)) is exactly 1.005 and
+# rounds UP, because str() of a float is its shortest round-tripping decimal.
+# That single conversion is what makes the convention implementable at all,
+# so every value entering money arithmetic must pass through to_money().
+
+MONEY_SCALE = Decimal("0.01")
+
+#: ISO-4217 codes the engine will issue documents in. A7 scopes the engine to
+#: two-decimal currencies only; a zero-decimal currency (JPY, KRW) would be
+#: silently given two decimals by this convention, which is how a wrong
+#: document reaches a foreign buyer years later. Extend deliberately.
+SUPPORTED_CURRENCIES: frozenset[str] = frozenset({"TRY", "USD", "EUR", "GBP"})
+
+
+class UnsupportedCurrencyError(ValueError):
+    """Raised for a currency whose minor unit is not two decimal places."""
+
+
+#: Sanity bound on any amount entering money arithmetic. This is NOT a business
+#: rule about invoice size — it exists because ``Decimal.quantize`` raises
+#: ``InvalidOperation`` when the result would need more digits than the context
+#: precision (28 by default), and an uncaught ``InvalidOperation`` escaping the
+#: engine would break the contract boundary rather than returning an error
+#: envelope. A7 found exactly that: ``unit_price = 1e26`` crashed
+#: ``create_proforma`` instead of being refused.
+#:
+#: Headroom at this bound: a taxable of 1e15 at scale 2 is 17 significant
+#: digits; multiplying by a rate up to 100 gives 19; summing a thousand such
+#: lines gives 21. The 28-digit default context therefore has room to spare, so
+#: the bound is what refuses an absurd input, never the arithmetic.
+MAX_AMOUNT_MAGNITUDE = Decimal("1e15")
+
+
+class AmountOutOfRangeError(ValueError):
+    """Raised for an amount whose magnitude exceeds ``MAX_AMOUNT_MAGNITUDE``."""
+
+
+class NonFiniteAmountError(ValueError):
+    """Raised for NaN or +/-Infinity reaching money arithmetic.
+
+    The pre-A7 range validators compared with ``<`` and ``<=``, and every
+    comparison against NaN is False, so ``nan`` passed ``quantity > 0``,
+    ``unit_price >= 0`` and the percent bounds alike and propagated into the
+    totals as ``nan``. Rejecting it here keeps the guarantee that a money
+    field is always a finite two-decimal number.
+    """
+
+
+def to_money(value: float | int | str | Decimal) -> Decimal:
+    """Convert an inbound amount to exact Decimal without binary float error.
+
+    Raises ``NonFiniteAmountError`` for NaN/Infinity rather than letting it
+    poison the arithmetic.
+    """
+    # str() unconditionally, including for a Decimal input. str() of a Decimal
+    # is its exact digits, so this is lossless for a clean Decimal — but it also
+    # normalizes a Decimal that was itself built from a float
+    # (``Decimal(1.005)`` -> ``Decimal("1.00499999999999989...")`` -> 1.005).
+    # Nothing can hand us a Decimal today because the schema declares float, so
+    # this is closing the hole before someone opens it upstream.
+    dec = Decimal(str(value))
+    if not dec.is_finite():
+        raise NonFiniteAmountError(f"amount must be finite, got {value!r}")
+    if abs(dec) > MAX_AMOUNT_MAGNITUDE:
+        raise AmountOutOfRangeError(
+            f"amount magnitude {value!r} exceeds {MAX_AMOUNT_MAGNITUDE}"
+        )
+    return dec
+
+
+def round_money(value: Decimal) -> Decimal:
+    """Quantize to exactly two decimals, ROUND_HALF_UP.
+
+    HALF_UP, not HALF_EVEN: the Owner's decision (2026-08-30), confirmed by
+    Codex against ROUND_CEILING — ceiling would push every fraction upward
+    and systematically overcharge the buyer.
+    """
+    return value.quantize(MONEY_SCALE, rounding=ROUND_HALF_UP)
+
+
+def money_out(value: Decimal) -> float:
+    """Render a quantized amount for the JSON envelope.
+
+    The contract's wire format is a JSON number and A7 does not change it.
+    A two-decimal Decimal converted to float round-trips through
+    ``json.dumps``/``json.loads`` to the same two-decimal value, because
+    ``repr`` of a float is its shortest round-tripping decimal. So the
+    envelope stays byte-compatible with pre-A7 callers while every amount it
+    carries is now exactly representable as printed.
+    """
+    return float(value)
+
+
+def validate_currency(code: str) -> str:
+    """Return the currency code, or raise for an out-of-scope one."""
+    normalized = (code or "").strip().upper()
+    if normalized not in SUPPORTED_CURRENCIES:
+        raise UnsupportedCurrencyError(
+            f"currency {code!r} is not supported; A7 scopes the engine to "
+            f"two-decimal currencies {sorted(SUPPORTED_CURRENCIES)}"
+        )
+    return normalized
 
 
 # ─────────────────────────────────────────────────────────────────────

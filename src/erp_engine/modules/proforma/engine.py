@@ -13,7 +13,9 @@ focuses on deterministic calculation and rule application.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
+from decimal import ROUND_DOWN, Decimal
 
 from pydantic import ValidationError as PydanticValidationError
 
@@ -23,9 +25,15 @@ from .rules import (
     DEFAULT_DOC_NUMBER_TEMPLATE,
     CustomerNoRequiredError,
     MissingTaxRuleError,
+    MONEY_SCALE,
+    UnsupportedCurrencyError,
     generate_document_number,
+    money_out,
     render_document_number,
     resolve_tax,
+    round_money,
+    to_money,
+    validate_currency,
 )
 from .schema import (
     CalculationTrace,
@@ -45,6 +53,24 @@ from .schema import (
 
 
 ENGINE_VERSION = "0.1.0"
+
+_HUNDRED = Decimal(100)
+
+
+@dataclass
+class _ResolvedLine:
+    """One line after pass 1 of the A7 money computation.
+
+    Holds the exact two-decimal amounts plus the resolved tax rate, so pass 2
+    can group by rate without recomputing anything.
+    """
+
+    line: object          # the inbound LineItem
+    gross: Decimal        # round2(quantity * unit_price)
+    discount_amount: Decimal
+    taxable: Decimal      # gross - discount_amount, exact by construction
+    tax_percent: Decimal
+    tax_reason: str
 
 
 def create_proforma(payload: dict) -> dict:
@@ -92,6 +118,20 @@ def create_proforma(payload: dict) -> dict:
     valid_until = proforma.header.valid_until or (
         issue_date + timedelta(days=30)
     ).isoformat()
+
+    # ── 3b. Currency scope (A7 §8) ──────────────────────────────────
+    # Checked BEFORE the numbering step so an out-of-scope currency can never
+    # burn a document sequence — the same pre-counter guard principle as A4's
+    # {CUSTOMER_NO} and A6's {DOCUMENT_TYPE_CODE} checks.
+    try:
+        currency = validate_currency(proforma.header.currency)
+    except UnsupportedCurrencyError as exc:
+        return _single_validation_error_response(
+            envelope.request_id,
+            code="unsupported_currency",
+            field="header.currency",
+            message=str(exc),
+        ).model_dump()
 
     # ── 4. Document number (A4: customer-anchored, tenant-isolated) ──
     # Numbering config is caller-supplied (tenant settings_json.numbering);
@@ -161,16 +201,32 @@ def create_proforma(payload: dict) -> dict:
     # ── 5. Ship-to resolution ───────────────────────────────────────
     ship_to_resolved = _resolve_ship_to(proforma)
 
-    # ── 6. Line-item computation ────────────────────────────────────
-    result_lines: list[ResultLineItem] = []
+    # ── 6. Line-item computation (A7: exact Decimal money) ──────────
+    #
+    # Two passes, because A7 computes tax per tax-rate group rather than per
+    # line. Pass 1 resolves each line's rate and its two-decimal taxable
+    # amount; pass 2 computes one rounded tax figure per rate and allocates it
+    # back to the lines, so the printed per-line tax column still sums to the
+    # printed tax total.
+    #
+    # Pre-A7 this was float arithmetic rounded to 4 places, which is why a TRY
+    # invoice could return grand_total 117.9882 — unprintable, and impossible
+    # to reconcile a PDF against a stored snapshot. Every amount below goes
+    # through to_money()/round_money(); see docs/CONTRACT_A7_MONEY_PRECISION.md.
+    resolved: list[_ResolvedLine] = []
     precedence_sources: list[str] = []
     tax_reasons: list[str] = []
     warnings: list[Warning] = []
 
     for line in proforma.line_items:
-        gross = round(line.quantity * line.unit_price, 4)
-        discount_amount = round(gross * (line.discount_percent / 100.0), 4)
-        taxable = round(gross - discount_amount, 4)
+        gross = round_money(to_money(line.quantity) * to_money(line.unit_price))
+        discount_amount = round_money(
+            gross * to_money(line.discount_percent) / _HUNDRED
+        )
+        # gross and discount_amount are both already quantized to two places,
+        # so their difference is exact and needs no further rounding. This is
+        # what makes subtotal - discount == sum(taxable) hold exactly.
+        taxable = gross - discount_amount
 
         # Tax resolution: same-country sales without a configured rate
         # surface as execution_error (no silent zero); cross-country
@@ -215,48 +271,124 @@ def create_proforma(payload: dict) -> dict:
                 )
             )
 
-        tax_amount = round(taxable * (decision.percent / 100.0), 4)
-        line_total = round(taxable + tax_amount, 4)
+        resolved.append(
+            _ResolvedLine(
+                line=line,
+                gross=gross,
+                discount_amount=discount_amount,
+                taxable=taxable,
+                tax_percent=to_money(decision.percent),
+                tax_reason=decision.reason,
+            )
+        )
 
+    # Pass 2 — one rounded tax figure per rate group (A7 §5).
+    #
+    # Rounding tax per line and summing it drifts by up to half a cent per
+    # line, which shows up on a long invoice. Rounding only the document total
+    # makes the printed lines fail to add up to the printed total. Grouping by
+    # rate is both standard UBL-TR / EU practice and the only variant where the
+    # document reconciles exactly against itself.
+    group_tax: dict[Decimal, Decimal] = {}
+    for rate in {item.tax_percent for item in resolved}:
+        base = sum(
+            (item.taxable for item in resolved if item.tax_percent == rate),
+            Decimal(0),
+        )
+        group_tax[rate] = round_money(base * rate / _HUNDRED)
+
+    # Allocate each group's tax back to its lines by LARGEST REMAINDER, so that
+    # the per-line column sums to the group figure without any single line
+    # absorbing the whole discrepancy.
+    #
+    # The first implementation of this rounded each line independently and gave
+    # the entire residual to the largest line, on the assumption the residual
+    # was "a cent or two". It is not: each per-line rounding can be off by up
+    # to half a cent, so the residual grows with the line count. Measured on
+    # n lines of taxable 0.07 at 18% — group tax n*0.0126 rounded, per line
+    # 0.01 — the residual is 0.01 at n=2 but 0.26 at n=100, which made one
+    # line's tax 0.27 against a correct 0.01. Twenty-seven times over, on a
+    # document a customer reads, while every reconciliation identity still
+    # held — so no totals-based test could see it.
+    #
+    # Largest remainder instead: floor every line to the cent, then hand out
+    # the remaining cents one at a time to the lines with the largest discarded
+    # fraction. That bounds any single line's adjustment to one cent regardless
+    # of line count, and keeps the result independent of iteration order
+    # (ordering is by descending fraction, ties by line_no).
+    line_tax: dict[int, Decimal] = {}
+    for rate, rate_total in group_tax.items():
+        members = [item for item in resolved if item.tax_percent == rate]
+        exact = {
+            item.line.line_no: item.taxable * rate / _HUNDRED for item in members
+        }
+        floored = {
+            line_no: value.quantize(MONEY_SCALE, rounding=ROUND_DOWN)
+            for line_no, value in exact.items()
+        }
+        line_tax.update(floored)
+
+        # Flooring never overshoots, so this count is always >= 0, and because
+        # each discarded fraction is under one cent it can never exceed the
+        # number of lines in the group. The modulo is defensive only.
+        shortfall = rate_total - sum(floored.values(), Decimal(0))
+        cents = int((shortfall / MONEY_SCALE).to_integral_value())
+        order = sorted(
+            members,
+            key=lambda item: (
+                -(exact[item.line.line_no] - floored[item.line.line_no]),
+                item.line.line_no,
+            ),
+        )
+        for index in range(cents):
+            line_tax[order[index % len(order)].line.line_no] += MONEY_SCALE
+
+    result_lines: list[ResultLineItem] = []
+    for item in resolved:
+        tax_amount = line_tax[item.line.line_no]
         result_lines.append(
             ResultLineItem(
-                line_no=line.line_no,
-                product_code=line.product_code,
-                product_description=line.product_description,
-                hs_code=line.hs_code,
-                quantity=line.quantity,
-                unit=line.unit,
-                unit_price=line.unit_price,
-                discount_percent=line.discount_percent,
-                discount_amount=discount_amount,
-                tax_percent=decision.percent,
-                tax_reason=decision.reason,
-                tax_amount=tax_amount,
-                line_total=line_total,
+                line_no=item.line.line_no,
+                product_code=item.line.product_code,
+                product_description=item.line.product_description,
+                hs_code=item.line.hs_code,
+                quantity=item.line.quantity,
+                unit=item.line.unit,
+                unit_price=item.line.unit_price,
+                discount_percent=item.line.discount_percent,
+                discount_amount=money_out(item.discount_amount),
+                tax_percent=float(item.tax_percent),
+                tax_reason=item.tax_reason,
+                tax_amount=money_out(tax_amount),
+                # line_total stays tax-inclusive, as pre-A7 — A7 changes the
+                # precision of the contract's fields, never their meaning.
+                line_total=money_out(item.taxable + tax_amount),
             )
         )
 
     # ── 7. Totals (PROFORMA_v1.md §5.7, CONTRACT_v1.md §11.5) ──────
-    subtotal_amount = round(
-        sum(line.quantity * line.unit_price for line in proforma.line_items),
-        4,
-    )
-    discount_amount = round(
-        sum(item.discount_amount for item in result_lines),
-        4,
-    )
-    freight_amount = round(proforma.terms.freight_cost, 4)
-    tax_amount = round(sum(item.tax_amount for item in result_lines), 4)
-    net_amount = round(subtotal_amount - discount_amount + freight_amount, 4)
-    grand_total = round(net_amount + tax_amount, 4)
+    #
+    # Every operand below is already quantized to two places, so these are
+    # exact Decimal sums and differences — no rounding step is applied here,
+    # and none is needed. That is what guarantees the document adds up as
+    # printed:
+    #     subtotal - discount + freight            == net_amount
+    #     net_amount + tax_amount                  == grand_total
+    #     sum(line_total) + freight                == grand_total
+    subtotal_amount = sum((item.gross for item in resolved), Decimal(0))
+    discount_total = sum((item.discount_amount for item in resolved), Decimal(0))
+    freight_amount = round_money(to_money(proforma.terms.freight_cost))
+    tax_total = sum(group_tax.values(), Decimal(0))
+    net_amount = subtotal_amount - discount_total + freight_amount
+    grand_total = net_amount + tax_total
 
     totals = ResultTotals(
-        subtotal_amount=subtotal_amount,
-        discount_amount=discount_amount,
-        freight_amount=freight_amount,
-        net_amount=net_amount,
-        tax_amount=tax_amount,
-        grand_total=grand_total,
+        subtotal_amount=money_out(subtotal_amount),
+        discount_amount=money_out(discount_total),
+        freight_amount=money_out(freight_amount),
+        net_amount=money_out(net_amount),
+        tax_amount=money_out(tax_total),
+        grand_total=money_out(grand_total),
     )
 
     # ── 8. Assemble response ────────────────────────────────────────
@@ -266,7 +398,7 @@ def create_proforma(payload: dict) -> dict:
             document_type=proforma.header.document_type,
             issue_date=proforma.header.issue_date,
             valid_until=valid_until,
-            currency=proforma.header.currency,
+            currency=currency,
         ),
         parties=ResultParties(
             seller=proforma.seller,
