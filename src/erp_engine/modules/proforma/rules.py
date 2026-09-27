@@ -71,10 +71,11 @@ class UnsupportedCurrencyError(ValueError):
 #: envelope. A7 found exactly that: ``unit_price = 1e26`` crashed
 #: ``create_proforma`` instead of being refused.
 #:
-#: Headroom at this bound: a taxable of 1e15 at scale 2 is 17 significant
-#: digits; multiplying by a rate up to 100 gives 19; summing a thousand such
-#: lines gives 21. The 28-digit default context therefore has room to spare, so
-#: the bound is what refuses an absurd input, never the arithmetic.
+#: Headroom at this bound, measured: 1e15 at scale 2 needs 18 coefficient
+#: digits, 20 after multiplying by a rate up to 100, and 21 summed over a
+#: thousand lines at the bound. The first magnitude that actually raises is
+#: 1e26 (1e25 uses all 28), so the bound sits eleven orders of magnitude below
+#: the wall and the bound is what refuses an absurd input, never the arithmetic.
 MAX_AMOUNT_MAGNITUDE = Decimal("1e15")
 
 

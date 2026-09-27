@@ -621,3 +621,36 @@ def test_schema_and_rules_magnitude_bounds_agree() -> None:
     the engine.
     """
     assert Decimal(str(_MAX_INPUT_MAGNITUDE)) == MAX_AMOUNT_MAGNITUDE
+
+
+def test_a_document_at_the_magnitude_bound_still_computes(
+    isolated_counter_db: Path,
+) -> None:
+    """The bound must sit inside the safe region, not on its edge.
+
+    §A7.3b claims the bound leaves the arithmetic comfortable. Measured, the
+    first magnitude that makes quantize raise is 1e26, and 1e25 already uses all
+    28 context digits — so the bound at 1e15 is eleven orders below the wall.
+    This pins the property that claim rests on: a multi-line document whose
+    lines sit exactly at the bound must return a normal result rather than an
+    exception, with every A7 invariant intact.
+
+    Without this test the headroom is a sentence in a document. Two of the three
+    digit counts in the first version of that sentence were wrong by one, which
+    is the argument for measuring the property rather than restating the
+    reasoning.
+    """
+    at_bound = float(MAX_AMOUNT_MAGNITUDE)
+    lines = [_line(i, 1, at_bound, tax=18.0) for i in range(1, 6)]
+    result = _ok(_payload("a7-at-bound", lines))
+
+    totals = result["totals"]
+    # invariants still hold at the extreme
+    assert _d(totals["subtotal_amount"]) - _d(totals["discount_amount"])         + _d(totals["freight_amount"]) == _d(totals["net_amount"])
+    assert _d(totals["net_amount"]) + _d(totals["tax_amount"]) == _d(totals["grand_total"])
+    line_tax = sum((_d(line["tax_amount"]) for line in result["line_items"]), Decimal(0))
+    assert line_tax == _d(totals["tax_amount"])
+
+    # and one step above the bound is refused rather than crashed
+    over = _line(1, 1, at_bound * 10, tax=18.0)
+    assert create_proforma(_payload("a7-over-bound", [over]))["status"] == "validation_error"

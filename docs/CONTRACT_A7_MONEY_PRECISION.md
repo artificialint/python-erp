@@ -113,9 +113,18 @@ bound — so `unit_price = 1e26` made `quantize` raise **straight out of `create
 through the contract boundary instead of an error envelope. Pre-A7 float arithmetic did not crash
 there, so **A7 introduced this path** and closes it by refusing the input.
 
-Headroom at this bound: a taxable of `1e15` at scale 2 is 17 significant digits; multiplying by a
-rate up to 100 gives 19; summing a thousand such lines gives 21. The 28-digit default context has
-room to spare, so what refuses an absurd input is the bound, never the arithmetic.
+Headroom at this bound, **measured rather than reasoned** — an earlier version of this paragraph
+counted two of the three wrong, off by one in each case:
+
+| value | digits the `Decimal` coefficient needs |
+|---|---|
+| `1e15` at scale 2 | 18 |
+| × a rate up to 100 | 20 |
+| summed over 1,000 lines at the bound | 21 |
+| the first magnitude that actually raises | **`1e26`** (`1e25` uses all 28) |
+
+So the bound sits eleven orders of magnitude below the wall, and the margin survives a hundred
+thousand lines at the bound. What refuses an absurd input is the bound, never the arithmetic.
 
 The bound is declared twice — as a `Decimal` in `rules.py` and a `float` in `schema.py`, so the
 validators stay free of `Decimal` — and a test asserts the two agree.
