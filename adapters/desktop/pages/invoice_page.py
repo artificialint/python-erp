@@ -34,6 +34,16 @@ from erp_data.repositories import lookups, permissions
 
 DOCUMENT_TYPES = ["quotation", "proforma_invoice", "commercial_invoice"]
 
+# Input scale of the line widgets. CONTRACT_A7 rule 9: quantity and unit price are
+# inputs, not money, so they must not be forced to two decimals — and
+# QDoubleSpinBox.setValue silently rounds to decimals(), which turned a valid unit
+# price of 0.105 into 0.11 before the engine saw it. Four places covers fractional
+# unit prices and three-decimal measures (kg, m, l) with one digit to spare, and
+# keeps a typed value within float's 15 significant digits up to 1e11. Money results
+# are still rounded to two places by the engine, not here.
+UNIT_PRICE_DECIMALS = 4
+QUANTITY_DECIMALS = 4
+
 
 class InvoicePage(QWidget):
     def __init__(self, session: Session, parent: QWidget | None = None) -> None:
@@ -75,11 +85,12 @@ class InvoicePage(QWidget):
         self.product.setPlaceholderText("product code")
         self.product_desc = QLabel("")
         self.qty = QDoubleSpinBox()
+        self.qty.setDecimals(QUANTITY_DECIMALS)
         self.qty.setMaximum(1e9)
         self.qty.setValue(1)
         self.unit_price = QDoubleSpinBox()
+        self.unit_price.setDecimals(UNIT_PRICE_DECIMALS)
         self.unit_price.setMaximum(1e12)
-        self.unit_price.setDecimals(2)
         self.add_btn = QPushButton("Add line")
         row.addWidget(QLabel("Product"))
         row.addWidget(self.product)
