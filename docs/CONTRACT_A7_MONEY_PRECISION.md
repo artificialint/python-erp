@@ -96,18 +96,20 @@ shortest round-tripping decimal. Without this conversion the convention is not i
 ## A7.3 JSON representation
 
 The wire format is unchanged: money fields remain JSON numbers, and the response schema still
-declares `float`. A two-decimal `Decimal` converted to `float` round-trips through
-`json.dumps`/`json.loads` to the same value, because a float's `repr` is its shortest
-round-tripping decimal. The guarantee A7 adds is that **every emitted amount has at most two
+declares `float`. Within the strict document bound in §A7.3b, a two-decimal `Decimal`
+converted to `float` round-trips through `json.dumps`/`json.loads` to the same decimal cents.
+This does not hold at arbitrary magnitudes: binary64 can lose cents on large amounts.
+The guarantee A7 adds is that **every emitted amount has at most two
 decimal places of significance** — formally, `Decimal(str(value)).as_tuple().exponent >= -2`.
 
 A trailing zero may not survive (`Decimal("80.00")` emits as `80.0`). That is a *display* concern:
 the value is exact, and formatting to two places (`%.2f`) is the caller's responsibility. The engine
 guarantees the number, not its presentation.
 
-## A7.3b Magnitude bound — `MAX_AMOUNT_MAGNITUDE = 1e15`
+## A7.3b Input and document magnitude bounds (A7-FIX-002)
 
-Not a business rule about invoice size. `Decimal.quantize` raises `InvalidOperation` when the result
+These are arithmetic/serialization safety limits, not commercial invoice-size policies.
+Each input retains `MAX_AMOUNT_MAGNITUDE = 1e15`. `Decimal.quantize` raises `InvalidOperation` when the result
 needs more digits than the context precision (28 by default), and A7's first implementation had no
 bound — so `unit_price = 1e26` made `quantize` raise **straight out of `create_proforma`**, a crash
 through the contract boundary instead of an error envelope. Pre-A7 float arithmetic did not crash
@@ -123,11 +125,42 @@ counted two of the three wrong, off by one in each case:
 | summed over 1,000 lines at the bound | 21 |
 | the first magnitude that actually raises | **`1e26`** (`1e25` uses all 28) |
 
-So the bound sits eleven orders of magnitude below the wall, and the margin survives a hundred
-thousand lines at the bound. What refuses an absurd input is the bound, never the arithmetic.
+The individual input guard alone is insufficient: `quantity = unit_price = 1e15` passes
+both guards but their product is `1e30`. Also, even amounts within the Decimal context can
+lose cents when converted to binary64 JSON numbers. Earlier claims that the individual guard
+protected all document arithmetic were incorrect.
 
 The bound is declared twice — as a `Decimal` in `rules.py` and a `float` in `schema.py`, so the
 validators stay free of `Decimal` — and a test asserts the two agree.
+
+**Normative document rule:** after structural/form/currency validation and **before every
+numbering path**, refuse a request if
+
+`2 × Σ round2(quantity × unit_price) + round2(freight_cost) >= MAX_DOCUMENT_AMOUNT`
+
+where `MAX_DOCUMENT_AMOUNT = Decimal("1e13")`, strictly exclusive. Return a
+`validation_error` envelope with code `amount_out_of_range`, field `payload`, and no number
+allocation. This applies equally to explicit document numbers and caller-supplied sequences.
+
+Pure tax resolution and money computation also finish before standalone number allocation.
+In particular, `missing_tax_rule` remains an `execution_error` but must not consume a number.
+The counter key, sequence format, render-only behavior and A4-A6 lifecycle rules are unchanged.
+
+The factor 2 reserves the maximum supported 100% tax, without depending on discounts or
+resolved tax rates. It bounds gross subtotal, discounts, net, tax, grand total and all line
+money fields. The bound is deliberately conservative: even a fully discounted or tax-free
+document must satisfy it. For example, gross `4999999999999.99` plus freight `0.01` passes
+(upper bound `9999999999999.99`); adding another `0.01` of freight fails.
+
+Below `1e13`, two-decimal amounts have at most 15 significant decimal digits; binary64 spacing
+is at most `0.001953125`, less than a cent. Their shortest decimal JSON representations recover
+the original decimal cents. Reconciliation identities apply to `Decimal(str(JSON_value))`,
+not to binary-float addition in a caller. Never recompute money using binary float.
+
+The preflight uses a private 50-digit Decimal context to inspect bounded input products,
+rejecting an unsafe product before quantizing it. Aggregate bounds are checked incrementally.
+It neither changes the caller's Decimal context nor uses the document bound to limit the
+input scale: a quantity of `1e15` with a sufficiently small unit price remains valid.
 
 ## A7.4 Input guards added
 
@@ -146,7 +179,7 @@ All figures below are derived from the rules above by hand, not from engine outp
 | case | line detail | tax | `grand_total` |
 |---|---|---|---|
 | 3 × 33.33 @18% | gross `99.99` | group base `99.99` → `18.00` | **`117.99`** |
-| 7 × 0.07 @18% | gross `0.07` each | base `0.49` → `0.09`; residual `0.02` to line 1 | **`0.58`** |
+| 7 × 0.07 @18% | gross `0.07` each | base `0.49` → `0.09`; one residual cent each to lines 1 and 2 | **`0.58`** |
 | 100 less 33.333% @20% | gross `100.00`, disc `33.33`, taxable `66.67` | `13.33` | **`80.00`** |
 | 1 × 1.005 @20% | gross `1.01` (HALF_UP) | `0.20` | **`1.21`** |
 | 3 × 0.10 @20% | gross `0.30` | `0.06` | **`0.36`** |
@@ -216,10 +249,12 @@ For every successful response:
 Zero- and three-decimal currencies; a `Decimal` wire format; unit-price input *scale* limits (the
 magnitude bound in §A7.3b is a sanity guard, not a precision policy); an upper bound on
 `freight_cost` beyond that magnitude guard, which is deliberately left to business rules rather than
-the engine; `erp_data` persistence rounding; PDF/XLSX presentation.
+the engine (subject to the document safety bound in §A7.3b); `erp_data` persistence rounding;
+PDF/XLSX presentation.
 
 ---
 
 **Separate claims, not one.** "A7 is correct" and "the deployed engine behaves correctly" are
-independent: `/opt/python-erp` is twelve commits behind this branch, and the image rebuild that
-would ship A7 also ships those twelve. Sequencing that is a deployment decision, not an A7 one.
+independent. The 2026-10-29 measurement found the canonical droplet checkout and running PHP
+images at `b29a0a9`, while the local branch is ahead. The host's legacy `/opt/python-erp` copy
+is not the canonical build source. A reviewed fix still requires a separate deployment decision.

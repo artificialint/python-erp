@@ -20,6 +20,7 @@ from decimal import ROUND_DOWN, Decimal
 from pydantic import ValidationError as PydanticValidationError
 
 from .rules import (
+    AmountOutOfRangeError,
     CounterStoreError,
     DEFAULT_COUNTER_SCOPE,
     DEFAULT_DOC_NUMBER_TEMPLATE,
@@ -34,6 +35,7 @@ from .rules import (
     round_money,
     to_money,
     validate_currency,
+    validate_document_amount,
 )
 from .schema import (
     CalculationTrace,
@@ -133,75 +135,25 @@ def create_proforma(payload: dict) -> dict:
             message=str(exc),
         ).model_dump()
 
-    # ── 4. Document number (A4: customer-anchored, tenant-isolated) ──
-    # Numbering config is caller-supplied (tenant settings_json.numbering);
-    # absent → engine defaults (legacy PRF / per_seller_annual). tenant_key
-    # namespaces the counter per tenant and is sourced from the existing
-    # context.customer_id — absent → legacy un-prefixed key (back-compat).
-    number_template = proforma.numbering.template or DEFAULT_DOC_NUMBER_TEMPLATE
-    counter_scope = proforma.numbering.counter_scope or DEFAULT_COUNTER_SCOPE
-    tenant_key = (
-        str(envelope.context.customer_id)
-        if envelope.context.customer_id is not None
-        else None
-    )
-    # Resolution order: explicit document_no (e.g. DRAFT brake) > A5 render-only
-    # (caller supplied numbering.seq — online issue, MySQL-allocated, NO engine
-    # counter) > allocate via the SQLite counter (standalone/desktop).
-    if proforma.header.document_no:
-        document_no = proforma.header.document_no
-    else:
-        try:
-            if proforma.numbering.seq is not None:
-                document_no = render_document_number(
-                    number_template,
-                    seq=proforma.numbering.seq,
-                    seller_code=proforma.seller.company_code,
-                    customer_no=proforma.buyer.customer_no,
-                    issue_date=issue_date,
-                    document_type=proforma.header.document_type,
-                )
-            else:
-                document_no = generate_document_number(
-                    seller_code=proforma.seller.company_code,
-                    issue_date=issue_date,
-                    template=number_template,
-                    counter_scope=counter_scope,
-                    customer_no=proforma.buyer.customer_no,
-                    document_type=proforma.header.document_type,
-                    tenant_key=tenant_key,
-                )
-        except CustomerNoRequiredError as exc:
-            return _single_validation_error_response(
-                envelope.request_id,
-                code="customer_no_required",
-                field="buyer.customer_no",
-                message=str(exc),
-            ).model_dump()
-        except CounterStoreError as exc:
-            # QA PE2 (revised after A's review): the number-allocation path touches a
-            # counter store, and only CustomerNoRequiredError was caught, so a locked,
-            # missing or read-only store escaped as a raw sqlite3.OperationalError
-            # straight through the contract boundary. Infrastructure failure is an
-            # execution_error — the request was fine, we could not serve it.
-            #
-            # This catch used to be `except Exception`, which would also have reported
-            # a genuine programming bug as an infrastructure failure. It is now a
-            # domain error raised by rules.py, the module that actually owns the
-            # storage. That keeps the engine storage-agnostic — narrowing to
-            # `sqlite3.Error` here would have meant importing sqlite3 into the engine
-            # and deepening the impurity H1/PE1 reports — while letting a real bug
-            # surface as itself.
-            return _single_execution_error_response(
-                envelope.request_id,
-                code="counter_store_unavailable",
-                message=f"document number could not be allocated: {exc}",
-            ).model_dump()
+    # A7: bound the whole document before ANY numbering path. Independent
+    # input limits do not bound quantity * unit_price or aggregate totals.
+    try:
+        validate_document_amount(
+            ((line.quantity, line.unit_price) for line in proforma.line_items),
+            proforma.terms.freight_cost,
+        )
+    except AmountOutOfRangeError as exc:
+        return _single_validation_error_response(
+            envelope.request_id,
+            code="amount_out_of_range",
+            field="payload",
+            message=str(exc),
+        ).model_dump()
 
-    # ── 5. Ship-to resolution ───────────────────────────────────────
+    # ── 4. Ship-to resolution ───────────────────────────────────────
     ship_to_resolved = _resolve_ship_to(proforma)
 
-    # ── 6. Line-item computation (A7: exact Decimal money) ──────────
+    # ── 5. Line-item computation (A7: exact Decimal money) ──────────
     #
     # Two passes, because A7 computes tax per tax-rate group rather than per
     # line. Pass 1 resolves each line's rate and its two-decimal taxable
@@ -366,7 +318,7 @@ def create_proforma(payload: dict) -> dict:
             )
         )
 
-    # ── 7. Totals (PROFORMA_v1.md §5.7, CONTRACT_v1.md §11.5) ──────
+    # ── 6. Totals (PROFORMA_v1.md §5.7, CONTRACT_v1.md §11.5) ──────
     #
     # Every operand below is already quantized to two places, so these are
     # exact Decimal sums and differences — no rounding step is applied here,
@@ -390,6 +342,73 @@ def create_proforma(payload: dict) -> dict:
         tax_amount=money_out(tax_total),
         grand_total=money_out(grand_total),
     )
+
+    # All pure validation, tax resolution and calculation succeeded. Only now
+    # may standalone numbering mutate its counter (including missing-tax cases).
+    # ── 7. Document number (A4: customer-anchored, tenant-isolated) ──
+    # Numbering config is caller-supplied (tenant settings_json.numbering);
+    # absent → engine defaults (legacy PRF / per_seller_annual). tenant_key
+    # namespaces the counter per tenant and is sourced from the existing
+    # context.customer_id — absent → legacy un-prefixed key (back-compat).
+    number_template = proforma.numbering.template or DEFAULT_DOC_NUMBER_TEMPLATE
+    counter_scope = proforma.numbering.counter_scope or DEFAULT_COUNTER_SCOPE
+    tenant_key = (
+        str(envelope.context.customer_id)
+        if envelope.context.customer_id is not None
+        else None
+    )
+    # Resolution order: explicit document_no (e.g. DRAFT brake) > A5 render-only
+    # (caller supplied numbering.seq — online issue, MySQL-allocated, NO engine
+    # counter) > allocate via the SQLite counter (standalone/desktop).
+    if proforma.header.document_no:
+        document_no = proforma.header.document_no
+    else:
+        try:
+            if proforma.numbering.seq is not None:
+                document_no = render_document_number(
+                    number_template,
+                    seq=proforma.numbering.seq,
+                    seller_code=proforma.seller.company_code,
+                    customer_no=proforma.buyer.customer_no,
+                    issue_date=issue_date,
+                    document_type=proforma.header.document_type,
+                )
+            else:
+                document_no = generate_document_number(
+                    seller_code=proforma.seller.company_code,
+                    issue_date=issue_date,
+                    template=number_template,
+                    counter_scope=counter_scope,
+                    customer_no=proforma.buyer.customer_no,
+                    document_type=proforma.header.document_type,
+                    tenant_key=tenant_key,
+                )
+        except CustomerNoRequiredError as exc:
+            return _single_validation_error_response(
+                envelope.request_id,
+                code="customer_no_required",
+                field="buyer.customer_no",
+                message=str(exc),
+            ).model_dump()
+        except CounterStoreError as exc:
+            # QA PE2 (revised after A's review): the number-allocation path touches a
+            # counter store, and only CustomerNoRequiredError was caught, so a locked,
+            # missing or read-only store escaped as a raw sqlite3.OperationalError
+            # straight through the contract boundary. Infrastructure failure is an
+            # execution_error — the request was fine, we could not serve it.
+            #
+            # This catch used to be `except Exception`, which would also have reported
+            # a genuine programming bug as an infrastructure failure. It is now a
+            # domain error raised by rules.py, the module that actually owns the
+            # storage. That keeps the engine storage-agnostic — narrowing to
+            # `sqlite3.Error` here would have meant importing sqlite3 into the engine
+            # and deepening the impurity H1/PE1 reports — while letting a real bug
+            # surface as itself.
+            return _single_execution_error_response(
+                envelope.request_id,
+                code="counter_store_unavailable",
+                message=f"document number could not be allocated: {exc}",
+            ).model_dump()
 
     # ── 8. Assemble response ────────────────────────────────────────
     result = ProformaResult(

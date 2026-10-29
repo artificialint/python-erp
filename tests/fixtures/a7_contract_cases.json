@@ -1,0 +1,1149 @@
+{
+  "fixture_version": 1,
+  "description": "Hand-derived A7 stable response projections; see A7_FIXTURES.md.",
+  "cases": [
+    {
+      "id": "a7-half-up-tax",
+      "request": {
+        "request_id": "a7-half-up-tax",
+        "schema_version": "contract_v1",
+        "module": "proforma_invoice",
+        "context": {
+          "source": "a7_precision_tests",
+          "actor_type": "system",
+          "actor_id": 1,
+          "customer_id": 1,
+          "tenant_slug": "pilot-ltd",
+          "locale": "tr-TR",
+          "timezone": "Europe/Istanbul"
+        },
+        "payload": {
+          "header": {
+            "document_type": "proforma_invoice",
+            "issue_date": "2026-06-07",
+            "document_no": "FIXTURE-a7-half-up-tax",
+            "currency": "TRY",
+            "valid_until": null,
+            "buyer_po_reference": null
+          },
+          "seller": {
+            "company_code": "IST",
+            "company_name": "UNO AgentAI Ltd",
+            "address": "Levent Mah.",
+            "city": "Istanbul",
+            "country": "TR",
+            "phone": "+90 212 000 00 00",
+            "email": "sales@example.com",
+            "tax_no": "1234567890"
+          },
+          "buyer": {
+            "company_name": "Test Buyer Ltd",
+            "address": "Ataturk Cad. 1",
+            "city": "Ankara",
+            "country": "TR",
+            "phone": "+90 312 000 00 00",
+            "email": "buyer@example.com",
+            "tax_no": "9876543210",
+            "source": "db_lookup"
+          },
+          "ship_to": {
+            "same_as_buyer": true,
+            "company_name": null,
+            "address": null,
+            "city": null,
+            "country": null,
+            "phone": null,
+            "email": null,
+            "source": "buyer_copy"
+          },
+          "line_items": [
+            {
+              "line_no": 1,
+              "product_code": "PRD-001",
+              "product_description": "Widget",
+              "hs_code": "902519",
+              "quantity": 3,
+              "unit": "PCS",
+              "unit_price": 33.33,
+              "discount_percent": 0.0,
+              "tax_percent": 18,
+              "line_notes": ""
+            }
+          ],
+          "terms": {
+            "freight_cost": 0,
+            "delivery_term": "EXW",
+            "delivery_location": "Istanbul Warehouse",
+            "delivery_date": null,
+            "payment_term": "%100 payment in advance"
+          },
+          "banking": {
+            "bank_name": null,
+            "bank_account": null,
+            "iban": null,
+            "swift_code": null
+          },
+          "notes": {
+            "notes_to_buyer": null,
+            "internal_notes": null
+          }
+        }
+      },
+      "expected": {
+        "status": "ok",
+        "errors": [],
+        "result": {
+          "totals": {
+            "subtotal_amount": 99.99,
+            "discount_amount": 0,
+            "freight_amount": 0,
+            "net_amount": 99.99,
+            "tax_amount": 18,
+            "grand_total": 117.99
+          },
+          "line_items": [
+            {
+              "line_no": 1,
+              "discount_amount": 0,
+              "tax_amount": 18,
+              "line_total": 117.99
+            }
+          ]
+        }
+      },
+      "exit_code": 0
+    },
+    {
+      "id": "a7-largest-remainder",
+      "request": {
+        "request_id": "a7-largest-remainder",
+        "schema_version": "contract_v1",
+        "module": "proforma_invoice",
+        "context": {
+          "source": "a7_precision_tests",
+          "actor_type": "system",
+          "actor_id": 1,
+          "customer_id": 1,
+          "tenant_slug": "pilot-ltd",
+          "locale": "tr-TR",
+          "timezone": "Europe/Istanbul"
+        },
+        "payload": {
+          "header": {
+            "document_type": "proforma_invoice",
+            "issue_date": "2026-06-07",
+            "document_no": "FIXTURE-a7-largest-remainder",
+            "currency": "TRY",
+            "valid_until": null,
+            "buyer_po_reference": null
+          },
+          "seller": {
+            "company_code": "IST",
+            "company_name": "UNO AgentAI Ltd",
+            "address": "Levent Mah.",
+            "city": "Istanbul",
+            "country": "TR",
+            "phone": "+90 212 000 00 00",
+            "email": "sales@example.com",
+            "tax_no": "1234567890"
+          },
+          "buyer": {
+            "company_name": "Test Buyer Ltd",
+            "address": "Ataturk Cad. 1",
+            "city": "Ankara",
+            "country": "TR",
+            "phone": "+90 312 000 00 00",
+            "email": "buyer@example.com",
+            "tax_no": "9876543210",
+            "source": "db_lookup"
+          },
+          "ship_to": {
+            "same_as_buyer": true,
+            "company_name": null,
+            "address": null,
+            "city": null,
+            "country": null,
+            "phone": null,
+            "email": null,
+            "source": "buyer_copy"
+          },
+          "line_items": [
+            {
+              "line_no": 1,
+              "product_code": "PRD-001",
+              "product_description": "Widget",
+              "hs_code": "902519",
+              "quantity": 1,
+              "unit": "PCS",
+              "unit_price": 0.07,
+              "discount_percent": 0.0,
+              "tax_percent": 18,
+              "line_notes": ""
+            },
+            {
+              "line_no": 2,
+              "product_code": "PRD-002",
+              "product_description": "Widget",
+              "hs_code": "902519",
+              "quantity": 1,
+              "unit": "PCS",
+              "unit_price": 0.07,
+              "discount_percent": 0.0,
+              "tax_percent": 18,
+              "line_notes": ""
+            },
+            {
+              "line_no": 3,
+              "product_code": "PRD-003",
+              "product_description": "Widget",
+              "hs_code": "902519",
+              "quantity": 1,
+              "unit": "PCS",
+              "unit_price": 0.07,
+              "discount_percent": 0.0,
+              "tax_percent": 18,
+              "line_notes": ""
+            },
+            {
+              "line_no": 4,
+              "product_code": "PRD-004",
+              "product_description": "Widget",
+              "hs_code": "902519",
+              "quantity": 1,
+              "unit": "PCS",
+              "unit_price": 0.07,
+              "discount_percent": 0.0,
+              "tax_percent": 18,
+              "line_notes": ""
+            },
+            {
+              "line_no": 5,
+              "product_code": "PRD-005",
+              "product_description": "Widget",
+              "hs_code": "902519",
+              "quantity": 1,
+              "unit": "PCS",
+              "unit_price": 0.07,
+              "discount_percent": 0.0,
+              "tax_percent": 18,
+              "line_notes": ""
+            },
+            {
+              "line_no": 6,
+              "product_code": "PRD-006",
+              "product_description": "Widget",
+              "hs_code": "902519",
+              "quantity": 1,
+              "unit": "PCS",
+              "unit_price": 0.07,
+              "discount_percent": 0.0,
+              "tax_percent": 18,
+              "line_notes": ""
+            },
+            {
+              "line_no": 7,
+              "product_code": "PRD-007",
+              "product_description": "Widget",
+              "hs_code": "902519",
+              "quantity": 1,
+              "unit": "PCS",
+              "unit_price": 0.07,
+              "discount_percent": 0.0,
+              "tax_percent": 18,
+              "line_notes": ""
+            }
+          ],
+          "terms": {
+            "freight_cost": 0,
+            "delivery_term": "EXW",
+            "delivery_location": "Istanbul Warehouse",
+            "delivery_date": null,
+            "payment_term": "%100 payment in advance"
+          },
+          "banking": {
+            "bank_name": null,
+            "bank_account": null,
+            "iban": null,
+            "swift_code": null
+          },
+          "notes": {
+            "notes_to_buyer": null,
+            "internal_notes": null
+          }
+        }
+      },
+      "expected": {
+        "status": "ok",
+        "errors": [],
+        "result": {
+          "totals": {
+            "subtotal_amount": 0.49,
+            "discount_amount": 0,
+            "freight_amount": 0,
+            "net_amount": 0.49,
+            "tax_amount": 0.09,
+            "grand_total": 0.58
+          },
+          "line_items": [
+            {
+              "line_no": 1,
+              "discount_amount": 0,
+              "tax_amount": 0.02,
+              "line_total": 0.09
+            },
+            {
+              "line_no": 2,
+              "discount_amount": 0,
+              "tax_amount": 0.02,
+              "line_total": 0.09
+            },
+            {
+              "line_no": 3,
+              "discount_amount": 0,
+              "tax_amount": 0.01,
+              "line_total": 0.08
+            },
+            {
+              "line_no": 4,
+              "discount_amount": 0,
+              "tax_amount": 0.01,
+              "line_total": 0.08
+            },
+            {
+              "line_no": 5,
+              "discount_amount": 0,
+              "tax_amount": 0.01,
+              "line_total": 0.08
+            },
+            {
+              "line_no": 6,
+              "discount_amount": 0,
+              "tax_amount": 0.01,
+              "line_total": 0.08
+            },
+            {
+              "line_no": 7,
+              "discount_amount": 0,
+              "tax_amount": 0.01,
+              "line_total": 0.08
+            }
+          ]
+        }
+      },
+      "exit_code": 0
+    },
+    {
+      "id": "a7-discount",
+      "request": {
+        "request_id": "a7-discount",
+        "schema_version": "contract_v1",
+        "module": "proforma_invoice",
+        "context": {
+          "source": "a7_precision_tests",
+          "actor_type": "system",
+          "actor_id": 1,
+          "customer_id": 1,
+          "tenant_slug": "pilot-ltd",
+          "locale": "tr-TR",
+          "timezone": "Europe/Istanbul"
+        },
+        "payload": {
+          "header": {
+            "document_type": "proforma_invoice",
+            "issue_date": "2026-06-07",
+            "document_no": "FIXTURE-a7-discount",
+            "currency": "TRY",
+            "valid_until": null,
+            "buyer_po_reference": null
+          },
+          "seller": {
+            "company_code": "IST",
+            "company_name": "UNO AgentAI Ltd",
+            "address": "Levent Mah.",
+            "city": "Istanbul",
+            "country": "TR",
+            "phone": "+90 212 000 00 00",
+            "email": "sales@example.com",
+            "tax_no": "1234567890"
+          },
+          "buyer": {
+            "company_name": "Test Buyer Ltd",
+            "address": "Ataturk Cad. 1",
+            "city": "Ankara",
+            "country": "TR",
+            "phone": "+90 312 000 00 00",
+            "email": "buyer@example.com",
+            "tax_no": "9876543210",
+            "source": "db_lookup"
+          },
+          "ship_to": {
+            "same_as_buyer": true,
+            "company_name": null,
+            "address": null,
+            "city": null,
+            "country": null,
+            "phone": null,
+            "email": null,
+            "source": "buyer_copy"
+          },
+          "line_items": [
+            {
+              "line_no": 1,
+              "product_code": "PRD-001",
+              "product_description": "Widget",
+              "hs_code": "902519",
+              "quantity": 1,
+              "unit": "PCS",
+              "unit_price": 100,
+              "discount_percent": 33.333,
+              "tax_percent": 20,
+              "line_notes": ""
+            }
+          ],
+          "terms": {
+            "freight_cost": 0,
+            "delivery_term": "EXW",
+            "delivery_location": "Istanbul Warehouse",
+            "delivery_date": null,
+            "payment_term": "%100 payment in advance"
+          },
+          "banking": {
+            "bank_name": null,
+            "bank_account": null,
+            "iban": null,
+            "swift_code": null
+          },
+          "notes": {
+            "notes_to_buyer": null,
+            "internal_notes": null
+          }
+        }
+      },
+      "expected": {
+        "status": "ok",
+        "errors": [],
+        "result": {
+          "totals": {
+            "subtotal_amount": 100,
+            "discount_amount": 33.33,
+            "freight_amount": 0,
+            "net_amount": 66.67,
+            "tax_amount": 13.33,
+            "grand_total": 80
+          },
+          "line_items": [
+            {
+              "line_no": 1,
+              "discount_amount": 33.33,
+              "tax_amount": 13.33,
+              "line_total": 80
+            }
+          ]
+        }
+      },
+      "exit_code": 0
+    },
+    {
+      "id": "a7-unit-price",
+      "request": {
+        "request_id": "a7-unit-price",
+        "schema_version": "contract_v1",
+        "module": "proforma_invoice",
+        "context": {
+          "source": "a7_precision_tests",
+          "actor_type": "system",
+          "actor_id": 1,
+          "customer_id": 1,
+          "tenant_slug": "pilot-ltd",
+          "locale": "tr-TR",
+          "timezone": "Europe/Istanbul"
+        },
+        "payload": {
+          "header": {
+            "document_type": "proforma_invoice",
+            "issue_date": "2026-06-07",
+            "document_no": "FIXTURE-a7-unit-price",
+            "currency": "TRY",
+            "valid_until": null,
+            "buyer_po_reference": null
+          },
+          "seller": {
+            "company_code": "IST",
+            "company_name": "UNO AgentAI Ltd",
+            "address": "Levent Mah.",
+            "city": "Istanbul",
+            "country": "TR",
+            "phone": "+90 212 000 00 00",
+            "email": "sales@example.com",
+            "tax_no": "1234567890"
+          },
+          "buyer": {
+            "company_name": "Test Buyer Ltd",
+            "address": "Ataturk Cad. 1",
+            "city": "Ankara",
+            "country": "TR",
+            "phone": "+90 312 000 00 00",
+            "email": "buyer@example.com",
+            "tax_no": "9876543210",
+            "source": "db_lookup"
+          },
+          "ship_to": {
+            "same_as_buyer": true,
+            "company_name": null,
+            "address": null,
+            "city": null,
+            "country": null,
+            "phone": null,
+            "email": null,
+            "source": "buyer_copy"
+          },
+          "line_items": [
+            {
+              "line_no": 1,
+              "product_code": "PRD-001",
+              "product_description": "Widget",
+              "hs_code": "902519",
+              "quantity": 1,
+              "unit": "PCS",
+              "unit_price": 1.005,
+              "discount_percent": 0.0,
+              "tax_percent": 20,
+              "line_notes": ""
+            }
+          ],
+          "terms": {
+            "freight_cost": 0,
+            "delivery_term": "EXW",
+            "delivery_location": "Istanbul Warehouse",
+            "delivery_date": null,
+            "payment_term": "%100 payment in advance"
+          },
+          "banking": {
+            "bank_name": null,
+            "bank_account": null,
+            "iban": null,
+            "swift_code": null
+          },
+          "notes": {
+            "notes_to_buyer": null,
+            "internal_notes": null
+          }
+        }
+      },
+      "expected": {
+        "status": "ok",
+        "errors": [],
+        "result": {
+          "totals": {
+            "subtotal_amount": 1.01,
+            "discount_amount": 0,
+            "freight_amount": 0,
+            "net_amount": 1.01,
+            "tax_amount": 0.2,
+            "grand_total": 1.21
+          },
+          "line_items": [
+            {
+              "line_no": 1,
+              "discount_amount": 0,
+              "tax_amount": 0.2,
+              "line_total": 1.21
+            }
+          ]
+        }
+      },
+      "exit_code": 0
+    },
+    {
+      "id": "a7-freight",
+      "request": {
+        "request_id": "a7-freight",
+        "schema_version": "contract_v1",
+        "module": "proforma_invoice",
+        "context": {
+          "source": "a7_precision_tests",
+          "actor_type": "system",
+          "actor_id": 1,
+          "customer_id": 1,
+          "tenant_slug": "pilot-ltd",
+          "locale": "tr-TR",
+          "timezone": "Europe/Istanbul"
+        },
+        "payload": {
+          "header": {
+            "document_type": "proforma_invoice",
+            "issue_date": "2026-06-07",
+            "document_no": "FIXTURE-a7-freight",
+            "currency": "TRY",
+            "valid_until": null,
+            "buyer_po_reference": null
+          },
+          "seller": {
+            "company_code": "IST",
+            "company_name": "UNO AgentAI Ltd",
+            "address": "Levent Mah.",
+            "city": "Istanbul",
+            "country": "TR",
+            "phone": "+90 212 000 00 00",
+            "email": "sales@example.com",
+            "tax_no": "1234567890"
+          },
+          "buyer": {
+            "company_name": "Test Buyer Ltd",
+            "address": "Ataturk Cad. 1",
+            "city": "Ankara",
+            "country": "TR",
+            "phone": "+90 312 000 00 00",
+            "email": "buyer@example.com",
+            "tax_no": "9876543210",
+            "source": "db_lookup"
+          },
+          "ship_to": {
+            "same_as_buyer": true,
+            "company_name": null,
+            "address": null,
+            "city": null,
+            "country": null,
+            "phone": null,
+            "email": null,
+            "source": "buyer_copy"
+          },
+          "line_items": [
+            {
+              "line_no": 1,
+              "product_code": "PRD-001",
+              "product_description": "Widget",
+              "hs_code": "902519",
+              "quantity": 1,
+              "unit": "PCS",
+              "unit_price": 100,
+              "discount_percent": 0.0,
+              "tax_percent": 20,
+              "line_notes": ""
+            }
+          ],
+          "terms": {
+            "freight_cost": 5.005,
+            "delivery_term": "EXW",
+            "delivery_location": "Istanbul Warehouse",
+            "delivery_date": null,
+            "payment_term": "%100 payment in advance"
+          },
+          "banking": {
+            "bank_name": null,
+            "bank_account": null,
+            "iban": null,
+            "swift_code": null
+          },
+          "notes": {
+            "notes_to_buyer": null,
+            "internal_notes": null
+          }
+        }
+      },
+      "expected": {
+        "status": "ok",
+        "errors": [],
+        "result": {
+          "totals": {
+            "subtotal_amount": 100,
+            "discount_amount": 0,
+            "freight_amount": 5.01,
+            "net_amount": 105.01,
+            "tax_amount": 20,
+            "grand_total": 125.01
+          },
+          "line_items": [
+            {
+              "line_no": 1,
+              "discount_amount": 0,
+              "tax_amount": 20,
+              "line_total": 120
+            }
+          ]
+        }
+      },
+      "exit_code": 0
+    },
+    {
+      "id": "a7-mixed-groups",
+      "request": {
+        "request_id": "a7-mixed-groups",
+        "schema_version": "contract_v1",
+        "module": "proforma_invoice",
+        "context": {
+          "source": "a7_precision_tests",
+          "actor_type": "system",
+          "actor_id": 1,
+          "customer_id": 1,
+          "tenant_slug": "pilot-ltd",
+          "locale": "tr-TR",
+          "timezone": "Europe/Istanbul"
+        },
+        "payload": {
+          "header": {
+            "document_type": "proforma_invoice",
+            "issue_date": "2026-06-07",
+            "document_no": "FIXTURE-a7-mixed-groups",
+            "currency": "TRY",
+            "valid_until": null,
+            "buyer_po_reference": null
+          },
+          "seller": {
+            "company_code": "IST",
+            "company_name": "UNO AgentAI Ltd",
+            "address": "Levent Mah.",
+            "city": "Istanbul",
+            "country": "TR",
+            "phone": "+90 212 000 00 00",
+            "email": "sales@example.com",
+            "tax_no": "1234567890"
+          },
+          "buyer": {
+            "company_name": "Test Buyer Ltd",
+            "address": "Ataturk Cad. 1",
+            "city": "Ankara",
+            "country": "TR",
+            "phone": "+90 312 000 00 00",
+            "email": "buyer@example.com",
+            "tax_no": "9876543210",
+            "source": "db_lookup"
+          },
+          "ship_to": {
+            "same_as_buyer": true,
+            "company_name": null,
+            "address": null,
+            "city": null,
+            "country": null,
+            "phone": null,
+            "email": null,
+            "source": "buyer_copy"
+          },
+          "line_items": [
+            {
+              "line_no": 1,
+              "product_code": "PRD-001",
+              "product_description": "Widget",
+              "hs_code": "902519",
+              "quantity": 1,
+              "unit": "PCS",
+              "unit_price": 0.07,
+              "discount_percent": 0.0,
+              "tax_percent": 18,
+              "line_notes": ""
+            },
+            {
+              "line_no": 2,
+              "product_code": "PRD-002",
+              "product_description": "Widget",
+              "hs_code": "902519",
+              "quantity": 1,
+              "unit": "PCS",
+              "unit_price": 0.07,
+              "discount_percent": 0.0,
+              "tax_percent": 18,
+              "line_notes": ""
+            },
+            {
+              "line_no": 3,
+              "product_code": "PRD-003",
+              "product_description": "Widget",
+              "hs_code": "902519",
+              "quantity": 1,
+              "unit": "PCS",
+              "unit_price": 0.07,
+              "discount_percent": 0.0,
+              "tax_percent": 18,
+              "line_notes": ""
+            },
+            {
+              "line_no": 4,
+              "product_code": "PRD-004",
+              "product_description": "Widget",
+              "hs_code": "902519",
+              "quantity": 1,
+              "unit": "PCS",
+              "unit_price": 0.19,
+              "discount_percent": 0.0,
+              "tax_percent": 8,
+              "line_notes": ""
+            },
+            {
+              "line_no": 5,
+              "product_code": "PRD-005",
+              "product_description": "Widget",
+              "hs_code": "902519",
+              "quantity": 1,
+              "unit": "PCS",
+              "unit_price": 0.19,
+              "discount_percent": 0.0,
+              "tax_percent": 8,
+              "line_notes": ""
+            }
+          ],
+          "terms": {
+            "freight_cost": 0,
+            "delivery_term": "EXW",
+            "delivery_location": "Istanbul Warehouse",
+            "delivery_date": null,
+            "payment_term": "%100 payment in advance"
+          },
+          "banking": {
+            "bank_name": null,
+            "bank_account": null,
+            "iban": null,
+            "swift_code": null
+          },
+          "notes": {
+            "notes_to_buyer": null,
+            "internal_notes": null
+          }
+        }
+      },
+      "expected": {
+        "status": "ok",
+        "errors": [],
+        "result": {
+          "totals": {
+            "subtotal_amount": 0.59,
+            "discount_amount": 0,
+            "freight_amount": 0,
+            "net_amount": 0.59,
+            "tax_amount": 0.07,
+            "grand_total": 0.66
+          },
+          "line_items": [
+            {
+              "line_no": 1,
+              "discount_amount": 0,
+              "tax_amount": 0.02,
+              "line_total": 0.09
+            },
+            {
+              "line_no": 2,
+              "discount_amount": 0,
+              "tax_amount": 0.01,
+              "line_total": 0.08
+            },
+            {
+              "line_no": 3,
+              "discount_amount": 0,
+              "tax_amount": 0.01,
+              "line_total": 0.08
+            },
+            {
+              "line_no": 4,
+              "discount_amount": 0,
+              "tax_amount": 0.02,
+              "line_total": 0.21
+            },
+            {
+              "line_no": 5,
+              "discount_amount": 0,
+              "tax_amount": 0.01,
+              "line_total": 0.2
+            }
+          ]
+        }
+      },
+      "exit_code": 0
+    },
+    {
+      "id": "invalid-quantity",
+      "request": {
+        "request_id": "invalid-quantity",
+        "schema_version": "contract_v1",
+        "module": "proforma_invoice",
+        "context": {
+          "source": "a7_precision_tests",
+          "actor_type": "system",
+          "actor_id": 1,
+          "customer_id": 1,
+          "tenant_slug": "pilot-ltd",
+          "locale": "tr-TR",
+          "timezone": "Europe/Istanbul"
+        },
+        "payload": {
+          "header": {
+            "document_type": "proforma_invoice",
+            "issue_date": "2026-06-07",
+            "document_no": "FIXTURE-invalid-quantity",
+            "currency": "TRY",
+            "valid_until": null,
+            "buyer_po_reference": null
+          },
+          "seller": {
+            "company_code": "IST",
+            "company_name": "UNO AgentAI Ltd",
+            "address": "Levent Mah.",
+            "city": "Istanbul",
+            "country": "TR",
+            "phone": "+90 212 000 00 00",
+            "email": "sales@example.com",
+            "tax_no": "1234567890"
+          },
+          "buyer": {
+            "company_name": "Test Buyer Ltd",
+            "address": "Ataturk Cad. 1",
+            "city": "Ankara",
+            "country": "TR",
+            "phone": "+90 312 000 00 00",
+            "email": "buyer@example.com",
+            "tax_no": "9876543210",
+            "source": "db_lookup"
+          },
+          "ship_to": {
+            "same_as_buyer": true,
+            "company_name": null,
+            "address": null,
+            "city": null,
+            "country": null,
+            "phone": null,
+            "email": null,
+            "source": "buyer_copy"
+          },
+          "line_items": [
+            {
+              "line_no": 1,
+              "product_code": "PRD-001",
+              "product_description": "Widget",
+              "hs_code": "902519",
+              "quantity": -1,
+              "unit": "PCS",
+              "unit_price": 100,
+              "discount_percent": 0.0,
+              "tax_percent": 20,
+              "line_notes": ""
+            }
+          ],
+          "terms": {
+            "freight_cost": 0.0,
+            "delivery_term": "EXW",
+            "delivery_location": "Istanbul Warehouse",
+            "delivery_date": null,
+            "payment_term": "%100 payment in advance"
+          },
+          "banking": {
+            "bank_name": null,
+            "bank_account": null,
+            "iban": null,
+            "swift_code": null
+          },
+          "notes": {
+            "notes_to_buyer": null,
+            "internal_notes": null
+          }
+        }
+      },
+      "expected": {
+        "status": "validation_error",
+        "result": null,
+        "errors": [
+          {
+            "code": "value_error",
+            "field": "payload.line_items[0].quantity"
+          }
+        ]
+      },
+      "exit_code": 2
+    },
+    {
+      "id": "unsupported-currency",
+      "request": {
+        "request_id": "unsupported-currency",
+        "schema_version": "contract_v1",
+        "module": "proforma_invoice",
+        "context": {
+          "source": "a7_precision_tests",
+          "actor_type": "system",
+          "actor_id": 1,
+          "customer_id": 1,
+          "tenant_slug": "pilot-ltd",
+          "locale": "tr-TR",
+          "timezone": "Europe/Istanbul"
+        },
+        "payload": {
+          "header": {
+            "document_type": "proforma_invoice",
+            "issue_date": "2026-06-07",
+            "document_no": "FIXTURE-unsupported-currency",
+            "currency": "JPY",
+            "valid_until": null,
+            "buyer_po_reference": null
+          },
+          "seller": {
+            "company_code": "IST",
+            "company_name": "UNO AgentAI Ltd",
+            "address": "Levent Mah.",
+            "city": "Istanbul",
+            "country": "TR",
+            "phone": "+90 212 000 00 00",
+            "email": "sales@example.com",
+            "tax_no": "1234567890"
+          },
+          "buyer": {
+            "company_name": "Test Buyer Ltd",
+            "address": "Ataturk Cad. 1",
+            "city": "Ankara",
+            "country": "TR",
+            "phone": "+90 312 000 00 00",
+            "email": "buyer@example.com",
+            "tax_no": "9876543210",
+            "source": "db_lookup"
+          },
+          "ship_to": {
+            "same_as_buyer": true,
+            "company_name": null,
+            "address": null,
+            "city": null,
+            "country": null,
+            "phone": null,
+            "email": null,
+            "source": "buyer_copy"
+          },
+          "line_items": [
+            {
+              "line_no": 1,
+              "product_code": "PRD-001",
+              "product_description": "Widget",
+              "hs_code": "902519",
+              "quantity": 1,
+              "unit": "PCS",
+              "unit_price": 100,
+              "discount_percent": 0.0,
+              "tax_percent": 20,
+              "line_notes": ""
+            }
+          ],
+          "terms": {
+            "freight_cost": 0.0,
+            "delivery_term": "EXW",
+            "delivery_location": "Istanbul Warehouse",
+            "delivery_date": null,
+            "payment_term": "%100 payment in advance"
+          },
+          "banking": {
+            "bank_name": null,
+            "bank_account": null,
+            "iban": null,
+            "swift_code": null
+          },
+          "notes": {
+            "notes_to_buyer": null,
+            "internal_notes": null
+          }
+        }
+      },
+      "expected": {
+        "status": "validation_error",
+        "result": null,
+        "errors": [
+          {
+            "code": "unsupported_currency",
+            "field": "header.currency"
+          }
+        ]
+      },
+      "exit_code": 2
+    },
+    {
+      "id": "document-overflow",
+      "request": {
+        "request_id": "document-overflow",
+        "schema_version": "contract_v1",
+        "module": "proforma_invoice",
+        "context": {
+          "source": "a7_precision_tests",
+          "actor_type": "system",
+          "actor_id": 1,
+          "customer_id": 1,
+          "tenant_slug": "pilot-ltd",
+          "locale": "tr-TR",
+          "timezone": "Europe/Istanbul"
+        },
+        "payload": {
+          "header": {
+            "document_type": "proforma_invoice",
+            "issue_date": "2026-06-07",
+            "document_no": "FIXTURE-document-overflow",
+            "currency": "TRY",
+            "valid_until": null,
+            "buyer_po_reference": null
+          },
+          "seller": {
+            "company_code": "IST",
+            "company_name": "UNO AgentAI Ltd",
+            "address": "Levent Mah.",
+            "city": "Istanbul",
+            "country": "TR",
+            "phone": "+90 212 000 00 00",
+            "email": "sales@example.com",
+            "tax_no": "1234567890"
+          },
+          "buyer": {
+            "company_name": "Test Buyer Ltd",
+            "address": "Ataturk Cad. 1",
+            "city": "Ankara",
+            "country": "TR",
+            "phone": "+90 312 000 00 00",
+            "email": "buyer@example.com",
+            "tax_no": "9876543210",
+            "source": "db_lookup"
+          },
+          "ship_to": {
+            "same_as_buyer": true,
+            "company_name": null,
+            "address": null,
+            "city": null,
+            "country": null,
+            "phone": null,
+            "email": null,
+            "source": "buyer_copy"
+          },
+          "line_items": [
+            {
+              "line_no": 1,
+              "product_code": "PRD-001",
+              "product_description": "Widget",
+              "hs_code": "902519",
+              "quantity": 1000000000000000.0,
+              "unit": "PCS",
+              "unit_price": 1000000000000000.0,
+              "discount_percent": 0.0,
+              "tax_percent": 20,
+              "line_notes": ""
+            }
+          ],
+          "terms": {
+            "freight_cost": 0.0,
+            "delivery_term": "EXW",
+            "delivery_location": "Istanbul Warehouse",
+            "delivery_date": null,
+            "payment_term": "%100 payment in advance"
+          },
+          "banking": {
+            "bank_name": null,
+            "bank_account": null,
+            "iban": null,
+            "swift_code": null
+          },
+          "notes": {
+            "notes_to_buyer": null,
+            "internal_notes": null
+          }
+        }
+      },
+      "expected": {
+        "status": "validation_error",
+        "result": null,
+        "errors": [
+          {
+            "code": "amount_out_of_range",
+            "field": "payload"
+          }
+        ]
+      },
+      "exit_code": 2
+    }
+  ]
+}

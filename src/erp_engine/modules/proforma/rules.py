@@ -24,10 +24,11 @@ from __future__ import annotations
 
 import os
 import sqlite3
+from collections.abc import Iterable
 from contextlib import closing
 from dataclasses import dataclass
 from datetime import date
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_HALF_UP, Decimal, localcontext
 from pathlib import Path
 from typing import Optional
 
@@ -75,12 +76,40 @@ class UnsupportedCurrencyError(ValueError):
 #: digits, 20 after multiplying by a rate up to 100, and 21 summed over a
 #: thousand lines at the bound. The first magnitude that actually raises is
 #: 1e26 (1e25 uses all 28), so the bound sits eleven orders of magnitude below
-#: the wall and the bound is what refuses an absurd input, never the arithmetic.
+#: the wall for a single amount. This bound alone does NOT protect products,
+#: aggregates or float serialization; validate_document_amount is also required.
 MAX_AMOUNT_MAGNITUDE = Decimal("1e15")
+
+# Strict document ceiling, separate from the individual input guard. Below
+# 1e13 binary64 spacing is smaller than a cent, preserving Decimal cents in
+# the shortest decimal JSON representation. Reserve 100% tax headroom even
+# when a caller supplies lower rates or discounts.
+MAX_DOCUMENT_AMOUNT = Decimal("1e13")
+
+
+def validate_document_amount(lines: Iterable[tuple[float, float]], freight: float) -> None:
+    """Reject unsafe gross/tax/freight bounds before allocating a number.
+
+    Inputs have already passed the schema's finite, nonnegative and 1e15
+    checks. Inspect each product BEFORE quantizing: two legal inputs can
+    multiply to 1e30, outside the default Decimal quantize context.
+    """
+    with localcontext() as context:
+        context.prec = 50
+        upper_bound = round_money(to_money(freight))
+        if upper_bound >= MAX_DOCUMENT_AMOUNT:
+            raise AmountOutOfRangeError("document amount must be below 1e13")
+        for quantity, unit_price in lines:
+            product = to_money(quantity) * to_money(unit_price)
+            if product >= MAX_DOCUMENT_AMOUNT:
+                raise AmountOutOfRangeError("document amount must be below 1e13")
+            upper_bound += 2 * round_money(product)
+            if upper_bound >= MAX_DOCUMENT_AMOUNT:
+                raise AmountOutOfRangeError("document amount must be below 1e13")
 
 
 class AmountOutOfRangeError(ValueError):
-    """Raised for an amount whose magnitude exceeds ``MAX_AMOUNT_MAGNITUDE``."""
+    """Raised for an unsafe input magnitude or conservative document bound."""
 
 
 class NonFiniteAmountError(ValueError):
@@ -130,11 +159,9 @@ def money_out(value: Decimal) -> float:
     """Render a quantized amount for the JSON envelope.
 
     The contract's wire format is a JSON number and A7 does not change it.
-    A two-decimal Decimal converted to float round-trips through
-    ``json.dumps``/``json.loads`` to the same two-decimal value, because
-    ``repr`` of a float is its shortest round-tripping decimal. So the
-    envelope stays byte-compatible with pre-A7 callers while every amount it
-    carries is now exactly representable as printed.
+    Within the strict document bound enforced before numbering, a two-decimal
+    Decimal converted to float round-trips through JSON to the same decimal
+    cents. This is NOT true for arbitrary magnitudes; the bound is required.
     """
     return float(value)
 

@@ -1,6 +1,6 @@
 # CONTRACT Amendment A5 — Render-Only Document Numbering
 
-**Status:** AMENDMENT SPEC (plan) — approved-in-principle by Codex 2026-07-05 (INV-4 §13.1/§13.2). **No engine code until explicit A5 code-phase GO.**
+**Status:** IMPLEMENTED — render-only numbering shipped in `ece5036`; online ledger integration remains caller-owned (INV-4 §13.1/§13.2).
 **Amends:** `template/docs/CONTRACT_v1.md` §10 (document number) — adds a *render-only* path; §7 payload (`numbering.seq`).
 **Implements in:** `src/erp_engine/modules/proforma/rules.py` (+ `engine.py` call site) + tests.
 **Companion:** `agentai-web/docs/INV_4_DOCUMENT_PERSISTENCE_PLAN.md` (the online ledger that supplies the seq).

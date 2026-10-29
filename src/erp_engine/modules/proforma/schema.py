@@ -12,7 +12,8 @@ format is a JSON number and A7 does not change it. The *arithmetic* is
 exact: as of Amendment A7 the engine converts every amount with
 ``Decimal(str(value))``, computes in ``Decimal``, and quantizes results to
 two places with ROUND_HALF_UP before emitting them. A two-decimal value
-round-trips through JSON unchanged, so the envelope stays compatible while
+round-trips through JSON unchanged within the pre-numbering document bound,
+so the envelope stays compatible while
 the amounts it carries are exactly representable as printed. See
 ``docs/CONTRACT_A7_MONEY_PRECISION.md``.
 """
